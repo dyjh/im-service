@@ -1,0 +1,22 @@
+server:
+  http:
+    addr: 0.0.0.0:8000
+    timeout: 1s
+  grpc:
+    addr: 0.0.0.0:9000
+    timeout: 1s
+data:
+  database:
+    driver: mysql
+    source: root:root@tcp(127.0.0.1:3306)/test?parseTime=True&loc=Local
+  redis:
+    addr: 127.0.0.1:6379
+    read_timeout: 0.2s
+    write_timeout: 0.2s
+websocket:
+  write_read_buffer_size: 20480          # 读写缓冲区分配字节，大概能存储 6800 多一点的文字
+  max_message_size: 65535               # 从消息管道读取消息的最大字节
+  ping_period: 5                      #心跳包频率，单位：秒
+  heartbeat_fail_max_times: 2            # 允许心跳失败的最大次数（默认设置为PingPeriod=30秒检测一次，连续4次没有心跳就会清除后端在线信息）
+  read_deadline: 50                   # 客户端在线情况下，正常的业务消息间隔秒数必须小于该值，否则服务器将会主动断开，该值不能小于心跳频率*允许失败次数,单位：秒。 0 表示不设限制，即服务器不主动断开不发送任何消息的在线客户端，但会消耗服务器资源
+  write_deadline: 35                   # 消息单次写入超时时间，单位：秒

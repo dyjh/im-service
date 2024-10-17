@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package chat.service.v1;
+
+import "google/api/annotations.proto";
+
+option go_package = "im-service/api/chat/service/v1;v1";
+option java_multiple_files = true;
+option java_package = "chat.service.v1";
+
+service Ws {
+	rpc SayHello (HelloRequest) returns (HelloReply) {
+		option (google.api.http) = {
+			get: "/user/{name}"
+		};
+	}
+}
+
+// The request message containing the user's name.
+message HelloRequest {
+	string name = 1;
+}
+
+// The response message containing the greetings
+message HelloReply {
+	string message = 1;
+}

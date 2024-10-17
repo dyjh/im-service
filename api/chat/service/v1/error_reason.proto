@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package chat.service.v1;
+
+option go_package = "im-service/chat/service/v1;v1";
+option java_multiple_files = true;
+option java_package = "chat.service.v1";
+option objc_class_prefix = "APICHATSERVICEV1";
+
+enum ErrorReason {
+  GREETER_UNSPECIFIED = 0;
+  USER_NOT_FOUND = 1;
+}
