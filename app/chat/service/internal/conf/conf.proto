@@ -8,6 +8,9 @@ import "google/protobuf/duration.proto";
 message Bootstrap {
   Server server = 1;
   Data data = 2;
+  Websocket websocket = 3;
+  Trace trace = 4;
+  RocketMq rocketMq = 5;
 }
 
 message Server {
@@ -33,9 +36,37 @@ message Data {
   message Redis {
     string network = 1;
     string addr = 2;
-    google.protobuf.Duration read_timeout = 3;
-    google.protobuf.Duration write_timeout = 4;
+    int32 db = 3;
+    string password = 4;
+    google.protobuf.Duration read_timeout = 5;
+    google.protobuf.Duration write_timeout = 6;
   }
   Database database = 1;
   Redis redis = 2;
+}
+
+message Websocket {
+  uint32 write_read_buffer_size = 1;
+  uint32 max_message_size = 2;
+  uint32 ping_period = 3;
+  uint32 heartbeat_fail_max_times = 4;
+  uint32 read_deadline = 5;
+  uint32 write_deadline = 6;
+}
+
+message Trace {
+  string endpoint = 1;
+}
+
+message Registry {
+  message Consul {
+    string address = 1;
+    string scheme = 2;
+  }
+  Consul consul = 1;
+}
+
+message RocketMq {
+  string addr = 1;
+  string groupPrefix = 2;
 }

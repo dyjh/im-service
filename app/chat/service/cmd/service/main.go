@@ -1,15 +1,9 @@
 package main
 
 import (
-	"context"
 	"flag"
-	"fmt"
-	"github.com/gin-gonic/gin"
-	kgin "github.com/go-kratos/gin"
 	"github.com/go-kratos/kratos/v2"
-	"github.com/go-kratos/kratos/v2/middleware"
-	"github.com/go-kratos/kratos/v2/middleware/recovery"
-	"github.com/go-kratos/kratos/v2/transport"
+	"github.com/go-kratos/kratos/v2/registry"
 	"im-service/app/chat/service/cmd/service/handler"
 	"im-service/app/chat/service/internal/conf"
 	"os"
@@ -20,37 +14,26 @@ import (
 	"github.com/go-kratos/kratos/v2/middleware/tracing"
 	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/go-kratos/kratos/v2/transport/http"
-
 	_ "go.uber.org/automaxprocs"
 )
 
 // go build -ldflags "-X main.Version=x.y.z"
 var (
 	// Name is the name of the compiled software.
-	Name string
+	Name = "im-service.chat.service"
 	// Version is the version of the compiled software.
-	Version string
-	// flagconf is the config flag.
-	flagconf string
+	Version = "v0.0.1"
+	// flagConf is the config flag.
+	flagConf string
 
 	id, _ = os.Hostname()
 )
 
 func init() {
-	flag.StringVar(&flagconf, "conf", "../../configs", "config path, eg: -conf config.yaml")
+	flag.StringVar(&flagConf, "conf", "../../configs", "config path, eg: -conf config.yaml")
 }
 
-func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server) *kratos.App {
-
-	router := gin.Default()
-	// 使用kratos中间件
-	router.Use(kgin.Middlewares(recovery.Recovery(), customMiddleware))
-
-	router.GET("/ws", handler.WsHandler)
-
-	httpSrv := http.NewServer(http.Address(":8000"))
-	httpSrv.HandlePrefix("/", router)
-
+func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, rr registry.Registrar) *kratos.App {
 	return kratos.New(
 		kratos.ID(id),
 		kratos.Name(Name),
@@ -60,19 +43,9 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server) *kratos.App {
 		kratos.Server(
 			gs,
 			hs,
-			httpSrv,
 		),
+		kratos.Registrar(rr),
 	)
-}
-
-func customMiddleware(handler middleware.Handler) middleware.Handler {
-	return func(ctx context.Context, req interface{}) (reply interface{}, err error) {
-		if tr, ok := transport.FromServerContext(ctx); ok {
-			fmt.Println("operation:", tr.Operation())
-		}
-		reply, err = handler(ctx, req)
-		return
-	}
 }
 
 func main() {
@@ -88,7 +61,7 @@ func main() {
 	)
 	c := config.New(
 		config.WithSource(
-			file.NewSource(flagconf),
+			file.NewSource(flagConf),
 		),
 	)
 	defer c.Close()
@@ -102,12 +75,29 @@ func main() {
 		panic(err)
 	}
 
-	app, cleanup, err := wireApp(bc.Server, bc.Data, logger)
+	var rc conf.Registry
+	if err := c.Scan(&rc); err != nil {
+		panic(err)
+	}
+
+	/*exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(bc.Trace.Endpoint)))
+	if err != nil {
+		panic(err)
+	}
+	tp := tracesdk.NewTracerProvider(
+		tracesdk.WithBatcher(exp),
+		tracesdk.WithResource(resource.NewSchemaless(
+			semconv.ServiceNameKey.String(Name),
+		)),
+	)*/
+
+	//app, cleanup, err := wireApp(&rc, bc.Server, bc.Data, logger, tp)
+	app, cleanup, err := wireApp(&rc, bc.RocketMq, bc.Server, bc.Data, logger)
 	if err != nil {
 		panic(err)
 	}
 	defer cleanup()
-
+	go handler.Manager.WebSocketStart(bc.Websocket, logger)
 	// start and wait for stop signal
 	if err := app.Run(); err != nil {
 		panic(err)

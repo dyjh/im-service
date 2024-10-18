@@ -9,19 +9,35 @@ option java_multiple_files = true;
 option java_package = "chat.service.v1";
 
 service Ws {
-	rpc SayHello (HelloRequest) returns (HelloReply) {
-		option (google.api.http) = {
-			get: "/user/{name}"
-		};
-	}
+	rpc BindMember (BindMemberRequest) returns (BindMemberReply);
+	rpc BindGroup (BindGroupRequest) returns (BindGroupReply);
+	rpc CancelGroup (CancelGroupRequest) returns (CancelGroupReply);
+	rpc SendMsg (SendMsgRequest) returns (SendMsgReply);
 }
 
-// The request message containing the user's name.
-message HelloRequest {
-	string name = 1;
+message BindMemberRequest {
+	uint64 member_id = 1;
+	string client_id = 2;
 }
 
-// The response message containing the greetings
-message HelloReply {
-	string message = 1;
+message BindMemberReply {}
+
+message BindGroupRequest {
+	string group_id = 1;
+	uint64 member_id = 2;
 }
+
+message BindGroupReply {}
+
+message CancelGroupRequest {
+	uint64 member_id = 1;
+}
+
+message CancelGroupReply {}
+
+message SendMsgRequest {
+	uint64 member_id = 1;
+	repeated bytes content = 2;
+}
+
+message SendMsgReply {}

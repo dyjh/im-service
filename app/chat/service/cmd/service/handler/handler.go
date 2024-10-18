@@ -1,13 +1,17 @@
 package handler
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"gitee.com/dyjh123/hpc_manager/server/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
 	"im-service/app/chat/service/cmd/service/consts"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 	//"strconv"
@@ -82,29 +86,42 @@ const (
 	Refresh      = "Refresh"      // 刷新消息列表
 )
 
-func WsHandler(ctx *gin.Context) {
+type Handler struct {
+	redisClient *redis.Client
+	log         *log.Helper
+}
+
+func NewHandler(redisClient *redis.Client, logger log.Logger) *Handler {
+	return &Handler{
+		redisClient: redisClient,
+		log:         log.NewHelper(logger),
+	}
+}
+
+func (h *Handler) WsHandler(ctx *gin.Context) {
+
 	// 升级成ws协议
 	conn, err := (&websocket.Upgrader{
-		ReadBufferSize:  global.GVA_CONFIG.Websocket.WriteReadBufferSize,
-		WriteBufferSize: global.GVA_CONFIG.Websocket.WriteReadBufferSize,
+		ReadBufferSize:  int(wsConf.WriteReadBufferSize),
+		WriteBufferSize: int(wsConf.WriteReadBufferSize),
 		CheckOrigin: func(r *http.Request) bool { // CheckOrigin解决跨域问题
 			return true
 		}}).
 		Upgrade(ctx.Writer, ctx.Request, nil)
 
 	if err != nil {
-		global.GVA_LOG.Error(consts.WebsocketUpgradeFailMsg, zap.Error(err))
+		h.log.Error(consts.WebsocketUpgradeFailMsg)
 		return
 	}
 
 	// 创建一个用户客户端会话实例
 	newClient := &Client{
-		Uid:           utils.GetClientUid(),
+		Uid:           getClientUid(),
 		Socket:        conn,
 		Send:          make(chan ChatContent),
 		State:         1,
-		ReadDeadline:  global.GVA_CONFIG.Websocket.ReadDeadline * time.Second,
-		WriteDeadline: global.GVA_CONFIG.Websocket.WriteDeadline * time.Second,
+		ReadDeadline:  time.Duration(wsConf.ReadDeadline) * time.Second,
+		WriteDeadline: time.Duration(wsConf.WriteDeadline) * time.Second,
 	}
 	// 用户会话注册到用户管理上
 	Manager.Register <- newClient
@@ -131,13 +148,28 @@ func SendMsgByUserId(userId uint, msg []byte) error {
 	return nil
 }
 
+func getClientUid() string {
+	// 获取当前时间戳（毫秒）
+	timestamp := time.Now().UnixNano() / int64(time.Millisecond)
+
+	// 将时间戳转换为字符串
+	timestampStr := strconv.FormatInt(timestamp, 10)
+
+	// 计算字符串的MD5哈希值
+	hash := md5.Sum([]byte(timestampStr))
+
+	// 将哈希值转换为十六进制字符串
+	return hex.EncodeToString(hash[:])
+}
+
 // 从websocket读取客户端用户的消息，然后服务器回应前端一个消息
 func (c *Client) read(ctx *gin.Context) {
 	defer func() { // 避免忘记关闭，所以要加上close
 		err := recover()
 		if err != nil {
 			if val, ok := err.(error); ok {
-				global.GVA_LOG.Error(consts.WebsocketReadFailMsg, zap.Error(val))
+				//global.GVA_LOG.Error(consts.WebsocketReadFailMsg, zap.Error(val))
+				fmt.Println("程序异常：" + val.Error())
 			}
 		}
 		_ = c.Socket.Close()
@@ -151,16 +183,16 @@ func (c *Client) read(ctx *gin.Context) {
 			continue
 		}
 		// 将原始消息打印为字符串
-		global.GVA_LOG.Info("收到的原始请求: " + string(rawMsg))
+		//global.GVA_LOG.Info("收到的原始请求: " + string(rawMsg))
 
 		sendMsg := new(SendMsg)
 		err = c.Socket.ReadJSON(&sendMsg)
 		isClose := false
 
 		if err != nil {
-			global.GVA_LOG.Error("格式错误", zap.Error(err))
+			//global.GVA_LOG.Error("格式错误", zap.Error(err))
 			if err.Error() == "websocket: close 1005 (no status)" {
-				global.GVA_LOG.Info(consts.WebsocketClientLogoutMsg, zap.String("ClientID", c.Uid))
+				//global.GVA_LOG.Info(consts.WebsocketClientLogoutMsg, zap.String("ClientID", c.Uid))
 				isClose = true
 			}
 			sendErr(c, "数据格式不正确", isClose)
@@ -241,7 +273,8 @@ func (c *Client) write() {
 		err := recover()
 		if err != nil {
 			if val, ok := err.(error); ok {
-				global.GVA_LOG.Error(consts.WebsocketSendMessageFailMsg, zap.Error(val))
+				//global.GVA_LOG.Error(consts.WebsocketSendMessageFailMsg, zap.Error(val))
+				fmt.Println("程序异常" + val.Error())
 			}
 		}
 		c.ticker.Stop()
@@ -254,7 +287,7 @@ func (c *Client) write() {
 				_ = c.sendByte(websocket.CloseMessage, []byte{})
 				return
 			}
-			global.GVA_LOG.Info("接收消息：", zap.Uint("memberId", c.MemberId), zap.Any("message", message))
+			//global.GVA_LOG.Info("接收消息：", zap.Uint("memberId", c.MemberId), zap.Any("message", message))
 			replyMsg := ReplyMsg{
 				Code:    consts.WsSuccess,
 				Type:    MsgReceive,
@@ -284,7 +317,7 @@ func (c *Client) write() {
 					fmt.Println("用户id映射打印：" + string(data2))
 
 					c.HeartbeatFailTimes++
-					if c.HeartbeatFailTimes > global.GVA_CONFIG.Websocket.HeartbeatFailMaxTimes {
+					if c.HeartbeatFailTimes > int(wsConf.HeartbeatFailMaxTimes) {
 						c.State = 0
 						Manager.Unregister <- c
 						return
@@ -340,7 +373,7 @@ func (c *Client) sendByte(messageType int, message []byte) error {
 
 // HeartBeat 心跳包处理方法
 func (c *Client) HeartBeat() {
-	c.ticker = time.NewTicker(global.GVA_CONFIG.Websocket.PingPeriod * time.Second)
+	c.ticker = time.NewTicker(time.Duration(wsConf.PingPeriod) * time.Second)
 	if c.ReadDeadline == 0 {
 		_ = c.Socket.SetReadDeadline(time.Time{})
 	} else {

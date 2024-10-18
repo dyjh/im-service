@@ -20,3 +20,6 @@ websocket:
   heartbeat_fail_max_times: 2            # 允许心跳失败的最大次数（默认设置为PingPeriod=30秒检测一次，连续4次没有心跳就会清除后端在线信息）
   read_deadline: 50                   # 客户端在线情况下，正常的业务消息间隔秒数必须小于该值，否则服务器将会主动断开，该值不能小于心跳频率*允许失败次数,单位：秒。 0 表示不设限制，即服务器不主动断开不发送任何消息的在线客户端，但会消耗服务器资源
   write_deadline: 35                   # 消息单次写入超时时间，单位：秒
+rocketMq:
+  addr: 127.0.0.1:9876
+  groupPrefix: "im-service"

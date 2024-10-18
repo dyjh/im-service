@@ -2,21 +2,19 @@ package service
 
 import (
 	"context"
-	"im-service/app/chat/service/internal/biz"
 
 	pb "im-service/api/chat/service/v1"
 )
 
-type WsService struct {
-	pb.UnimplementedWsServer
-
-	uc *biz.WsUsecase
+func (ws *WsService) BindMember(ctx context.Context, req *pb.BindMemberRequest) (*pb.BindMemberReply, error) {
+	return ws.wc.BindMember(ctx, req)
 }
-
-func NewWsService(uc *biz.WsUsecase) *WsService {
-	return &WsService{uc: uc}
+func (ws *WsService) BindGroup(ctx context.Context, req *pb.BindGroupRequest) (*pb.BindGroupReply, error) {
+	return ws.wc.BindGroup(ctx, req)
 }
-
-func (s *WsService) SayHello(ctx context.Context, req *pb.HelloRequest) (*pb.HelloReply, error) {
-	return &pb.HelloReply{}, nil
+func (ws *WsService) CancelGroup(ctx context.Context, req *pb.CancelGroupRequest) (*pb.CancelGroupReply, error) {
+	return ws.wc.CancelGroup(ctx, req)
+}
+func (ws *WsService) SendMsg(ctx context.Context, req *pb.SendMsgRequest) (*pb.SendMsgReply, error) {
+	return ws.wc.SendMsg(ctx, req)
 }
