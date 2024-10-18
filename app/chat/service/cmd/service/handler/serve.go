@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	_ "fmt"
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-redis/redis/v8"
 	"im-service/app/chat/service/cmd/service/consts"
 	"im-service/app/chat/service/internal/conf"
+	"im-service/app/chat/service/utils"
+	"strconv"
 
 	//"github.com/gin-gonic/gin/binding"
 
@@ -27,7 +31,7 @@ type ClientEvent struct {
 
 var wsConf *conf.Websocket
 
-func (manager *ClientManager) WebSocketStart(c *conf.Websocket, logger log.Logger) {
+func (manager *ClientManager) WebSocketStart(c *conf.Websocket, logger log.Logger, rdb *redis.Client) {
 	logHelper := log.NewHelper(logger)
 	wsConf = c
 	for {
@@ -48,7 +52,14 @@ func (manager *ClientManager) WebSocketStart(c *conf.Websocket, logger log.Logge
 		case conn := <-Manager.Unregister: // 断开连接
 			logHelper.Info("注销客户端")
 			fmt.Println("注销客户端")
+
 			if conn.MemberId > 0 {
+
+				if conn.GroupId != "" {
+					mId := strconv.Itoa(int(conn.MemberId))
+					_ = utils.RemoveUserFromGroup(context.Background(), rdb, conn.GroupId, mId)
+				}
+
 				if ClientId, ok := Manager.MapUserIdToClientId[conn.MemberId]; ok && ClientId == conn.Uid {
 					delete(Manager.MapUserIdToClientId, conn.MemberId)
 				}

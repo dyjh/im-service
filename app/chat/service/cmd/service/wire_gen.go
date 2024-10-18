@@ -7,6 +7,7 @@
 package main
 
 import (
+	"github.com/go-redis/redis/v8"
 	"im-service/app/chat/service/internal/biz"
 	"im-service/app/chat/service/internal/conf"
 	"im-service/app/chat/service/internal/data"
@@ -23,22 +24,22 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(registry *conf.Registry, confMq *conf.RocketMq, confServer *conf.Server, confData *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
+func wireApp(registry *conf.Registry, confMq *conf.RocketMq, confServer *conf.Server, confData *conf.Data, logger log.Logger) (*kratos.App, *redis.Client, func(), error) {
 	redis := data.NewRedisClient(confData)
 	producer := data.NewMqProducer(confMq)
-	consumer := data.NewMqConsumer(confMq)
-	dataData, cleanup, err := data.NewData(redis, producer, consumer, logger)
+	consumer, mqTag := data.NewMqConsumer(confMq)
+	dataData, cleanup, err := data.NewData(redis, producer, consumer, mqTag, logger, confServer)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	wsRepo := data.NewWsRepo(dataData, logger)
 	WsUseCase := biz.NewWsUseCase(wsRepo, logger)
 	wsService := service.NewWsService(WsUseCase, logger)
 	grpcServer := server.NewGRPCServer(confServer, wsService, logger)
-	httpServer := server.NewHTTPServer(confServer, redis, logger)
+	httpServer := server.NewHTTPServer(confServer, redis, producer, logger)
 	registrar := server.NewRegistrar(registry)
 	app := newApp(logger, grpcServer, httpServer, registrar)
-	return app, func() {
+	return app, redis, func() {
 		cleanup()
 	}, nil
 }

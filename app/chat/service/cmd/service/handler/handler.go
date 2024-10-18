@@ -5,11 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
 	"im-service/app/chat/service/cmd/service/consts"
+	"im-service/app/chat/service/utils"
 	"net/http"
 	"strconv"
 	"sync"
@@ -48,7 +50,7 @@ type ReplyMsg struct {
 type Client struct {
 	Uid                string
 	MemberId           uint
-	GroupId            uint
+	GroupId            string
 	GroupNo            string
 	Socket             *websocket.Conn `json:"-"`
 	State              int
@@ -89,12 +91,14 @@ const (
 type Handler struct {
 	redisClient *redis.Client
 	log         *log.Helper
+	producer    rocketmq.Producer
 }
 
-func NewHandler(redisClient *redis.Client, logger log.Logger) *Handler {
+func NewHandler(redisClient *redis.Client, producer rocketmq.Producer, logger log.Logger) *Handler {
 	return &Handler{
 		redisClient: redisClient,
 		log:         log.NewHelper(logger),
+		producer:    producer,
 	}
 }
 
@@ -127,7 +131,7 @@ func (h *Handler) WsHandler(ctx *gin.Context) {
 	Manager.Register <- newClient
 
 	// ---------------------------------------- //
-	go newClient.read(ctx)
+	go newClient.read(ctx, h)
 	go newClient.write()
 
 	// 启动心跳服务
@@ -163,7 +167,7 @@ func getClientUid() string {
 }
 
 // 从websocket读取客户端用户的消息，然后服务器回应前端一个消息
-func (c *Client) read(ctx *gin.Context) {
+func (c *Client) read(ctx *gin.Context, h *Handler) {
 	defer func() { // 避免忘记关闭，所以要加上close
 		err := recover()
 		if err != nil {
@@ -222,12 +226,13 @@ func (c *Client) read(ctx *gin.Context) {
 			continue
 		}
 
-		if c.GroupId == 0 {
+		if c.GroupId == "" {
 			sendErr(c, "未指定消息发送对象", false)
 			continue
 		}
 
-		/*var MessageNo = utils.GetMessageNo()
+		// 获取唯一消息编号
+		var MessageNo = utils.GetMessageNo()
 
 		MsgContent := ChatContent{
 			MessageId:   MessageNo,
@@ -235,6 +240,8 @@ func (c *Client) read(ctx *gin.Context) {
 			Content:     sendMsg.Content,
 			CreateAt:    time.Now(),
 		}
+
+		ContentBytes, _ := json.Marshal(sendMsg.Content)
 
 		// 消息发送id
 		var SendIds = make([]uint64, 10, 50)
@@ -245,7 +252,22 @@ func (c *Client) read(ctx *gin.Context) {
 			}
 		}
 
-		var NoticeIds []uint
+		// 根据GroupId获取组成员
+		GroupClients, err := utils.GetUsersInGroup(ctx, h.redisClient, c.GroupId)
+		if err != nil {
+			sendErr(c, "聊天组数据错误，请联系管理员", isClose)
+			return
+		}
+		GroupOnlineMemberIds := make([]int, 0, 4)
+		for ClientMemberId, clientInfo := range GroupClients {
+			mId, _ := strconv.Atoi(ClientMemberId)
+			GroupOnlineMemberIds = append(GroupOnlineMemberIds, mId)
+			err = utils.SendMqMsg(h.producer, "chatMessage", clientInfo.MQTag, ContentBytes)
+			if err != nil {
+				sendErr(c, "消息发送失败，请联系管理员", isClose)
+				return
+			}
+		}
 
 		replyMsg := ReplyMsg{
 			Code:    consts.WsSuccess,
@@ -256,14 +278,7 @@ func (c *Client) read(ctx *gin.Context) {
 		// 回复数据至前端用户
 		_ = c.sendByte(websocket.TextMessage, msg)
 
-		globalReply, _ := json.Marshal(ReplyMsg{Type: "refreshChatList"})
-		for _, client := range Manager.Clients {
-			go func(clientV *Client) {
-				if utils.UintExistsInSlice(clientV.MemberId, NoticeIds) {
-					_ = clientV.sendByte(websocket.TextMessage, globalReply)
-				}
-			}(client)
-		}*/
+		// TODO 对Group内未在线用户发送消息记录
 	}
 }
 

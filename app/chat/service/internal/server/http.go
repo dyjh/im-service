@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/gin-gonic/gin"
 	kgin "github.com/go-kratos/gin"
 	"github.com/go-kratos/kratos/v2/log"
@@ -29,7 +30,7 @@ func customMiddleware(handler middleware.Handler) middleware.Handler {
 	}
 }
 
-func NewHTTPServer(c *conf.Server, r *redis.Client, logger log.Logger) *http.Server {
+func NewHTTPServer(c *conf.Server, r *redis.Client, producer rocketmq.Producer, logger log.Logger) *http.Server {
 
 	var opts = []http.ServerOption{
 		http.Middleware(
@@ -64,7 +65,7 @@ func NewHTTPServer(c *conf.Server, r *redis.Client, logger log.Logger) *http.Ser
 	router := gin.Default()
 	// 使用kratos中间件
 	router.Use(kgin.Middlewares(recovery.Recovery(), customMiddleware))
-	h := handler.NewHandler(r, logger)
+	h := handler.NewHandler(r, producer, logger)
 	router.GET("/ws", h.WsHandler)
 	httpSrv.HandlePrefix("/", router)
 

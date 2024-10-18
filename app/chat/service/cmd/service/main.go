@@ -92,12 +92,12 @@ func main() {
 	)*/
 
 	//app, cleanup, err := wireApp(&rc, bc.Server, bc.Data, logger, tp)
-	app, cleanup, err := wireApp(&rc, bc.RocketMq, bc.Server, bc.Data, logger)
+	app, rdb, cleanup, err := wireApp(&rc, bc.RocketMq, bc.Server, bc.Data, logger)
 	if err != nil {
 		panic(err)
 	}
 	defer cleanup()
-	go handler.Manager.WebSocketStart(bc.Websocket, logger)
+	go handler.Manager.WebSocketStart(bc.Websocket, logger, rdb)
 	// start and wait for stop signal
 	if err := app.Run(); err != nil {
 		panic(err)

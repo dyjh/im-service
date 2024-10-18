@@ -22,7 +22,7 @@ type WsUseCase struct {
 }
 
 func NewWsUseCase(repo WsRepo, logger log.Logger) *WsUseCase {
-	return &WsUseCase{repo: repo, log: log.NewHelper(log.With(logger, "module", "usecase/cart"))}
+	return &WsUseCase{repo: repo, log: log.NewHelper(log.With(logger, "module", "useCase/chat"))}
 }
 
 // WsRepo is a Greater repo.
