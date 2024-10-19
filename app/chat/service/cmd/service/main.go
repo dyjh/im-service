@@ -2,9 +2,11 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/registry"
 	"im-service/app/chat/service/internal/conf"
+	"im-service/app/chat/service/utils"
 	"os"
 	"strings"
 
@@ -20,7 +22,7 @@ import (
 // go build -ldflags "-X main.Version=x.y.z"
 var (
 	// Name is the name of the compiled software.
-	Name = "im-service.chat.service"
+	Name = "im-service_chat_service"
 	// Version is the version of the compiled software.
 	Version = "v0.0.1"
 	// flagConf is the config flag.
@@ -34,6 +36,11 @@ func init() {
 }
 
 func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, rr registry.Registrar) *kratos.App {
+
+	IP, _ := utils.GetLocalIP()
+
+	id = fmt.Sprintf("%s_chat_service", IP)
+
 	return kratos.New(
 		kratos.ID(id),
 		kratos.Name(Name),
@@ -41,8 +48,8 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, rr registry.Reg
 		kratos.Metadata(map[string]string{}),
 		kratos.Logger(logger),
 		kratos.Server(
-			gs,
 			hs,
+			gs,
 		),
 		kratos.Registrar(rr),
 	)
