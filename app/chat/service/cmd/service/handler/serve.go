@@ -6,9 +6,8 @@ import (
 	"fmt"
 	_ "fmt"
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-redis/redis/v8"
-	"im-service/app/chat/service/cmd/service/consts"
 	"im-service/app/chat/service/internal/conf"
+	"im-service/app/chat/service/internal/consts"
 	"im-service/app/chat/service/utils"
 	"strconv"
 
@@ -31,15 +30,15 @@ type ClientEvent struct {
 
 var wsConf *conf.Websocket
 
-func (manager *ClientManager) WebSocketStart(c *conf.Websocket, logger log.Logger, rdb *redis.Client) {
+func (manager *ClientManager) WebSocketStart(c *conf.Websocket, logger log.Logger) {
 	logHelper := log.NewHelper(logger)
 	wsConf = c
 	for {
 		//global.GVA_LOG.Info("<---监听管道通信--->")
 		select {
-		case conn := <-Manager.Register: // 建立连接
+		case conn := <-manager.Register: // 建立连接
 			logHelper.Info("建立新连接:" + "ClientID - " + conn.Uid)
-			Manager.Clients[conn.Uid] = conn
+			manager.Clients[conn.Uid] = conn
 			replyMsg := &InitMsg{
 				Code:     consts.WsSuccess,
 				Type:     "init",
@@ -49,7 +48,7 @@ func (manager *ClientManager) WebSocketStart(c *conf.Websocket, logger log.Logge
 			msg, _ := json.Marshal(replyMsg)
 			_ = conn.sendByte(websocket.TextMessage, msg)
 
-		case conn := <-Manager.Unregister: // 断开连接
+		case conn := <-manager.Unregister: // 断开连接
 			logHelper.Info("注销客户端")
 			fmt.Println("注销客户端")
 
@@ -57,18 +56,20 @@ func (manager *ClientManager) WebSocketStart(c *conf.Websocket, logger log.Logge
 
 				if conn.GroupId != "" {
 					mId := strconv.Itoa(int(conn.MemberId))
-					_ = utils.RemoveUserFromGroup(context.Background(), rdb, conn.GroupId, mId)
+					ctx := context.Background()
+					_ = utils.UnbindUserFromGroup(ctx, manager.RedisClient, mId, conn.GroupId)
+					_ = utils.DeleteUserInfo(ctx, manager.RedisClient, mId)
 				}
 
-				if ClientId, ok := Manager.MapUserIdToClientId[conn.MemberId]; ok && ClientId == conn.Uid {
-					delete(Manager.MapUserIdToClientId, conn.MemberId)
+				if ClientId, ok := manager.MapUserIdToClientId[conn.MemberId]; ok && ClientId == conn.Uid {
+					delete(manager.MapUserIdToClientId, conn.MemberId)
 				}
 			}
 
-			if _, ok := Manager.Clients[conn.Uid]; ok {
+			if _, ok := manager.Clients[conn.Uid]; ok {
 				logHelper.Info("删除链接")
 				close(conn.Send)
-				delete(Manager.Clients, conn.Uid)
+				delete(manager.Clients, conn.Uid)
 			}
 		}
 		//

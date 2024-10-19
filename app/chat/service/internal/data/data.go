@@ -2,14 +2,19 @@ package data
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/apache/rocketmq-client-go/v2/producer"
+	"github.com/apache/rocketmq-client-go/v2/rlog"
 	"github.com/go-redis/redis/v8"
+	"im-service/app/chat/service/cmd/service/handler"
 	"im-service/app/chat/service/internal/conf"
+	"im-service/app/chat/service/internal/consts"
 	"im-service/app/chat/service/utils"
+	"strconv"
 	"strings"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -22,12 +27,13 @@ var ProviderSet = wire.NewSet(NewData, NewWsRepo)
 // Data .
 type Data struct {
 	// TODO wrapped database client
-	log   *log.Helper
-	p     rocketmq.Producer
-	r     *redis.Client
-	IP    string
-	mqTag string
-	Port  string
+	log           *log.Helper
+	p             rocketmq.Producer
+	r             *redis.Client
+	IP            string
+	mqTag         string
+	Port          string
+	clientManager *handler.ClientManager
 }
 
 // NewRedisClient 初始化 Redis 客户端
@@ -39,7 +45,8 @@ func NewRedisClient(c *conf.Data) *redis.Client {
 	})
 }
 
-func NewMqProducer(conf *conf.RocketMq) rocketmq.Producer {
+func NewMqProducer(conf *conf.RocketMq, logLevel string) rocketmq.Producer {
+	rlog.SetLogLevel(logLevel)
 	p, err := rocketmq.NewProducer(
 		producer.WithNameServer([]string{conf.Addr}),              // 替换为您的 NameServer 地址
 		producer.WithGroupName(conf.GroupPrefix+"_chat_producer"), // 替换为您的生产者组名
@@ -54,22 +61,55 @@ func NewMqProducer(conf *conf.RocketMq) rocketmq.Producer {
 	return p
 }
 
-func NewMqConsumer(conf *conf.RocketMq) (rocketmq.PushConsumer, string) {
+func NewMqConsumer(conf *conf.RocketMq, logLevel string, h *handler.Handler) (rocketmq.PushConsumer, string) {
+
+	rlog.SetLogLevel(logLevel)
+
 	c, err := rocketmq.NewPushConsumer(
 		consumer.WithNameServer([]string{conf.Addr}),              // 替换为您的 NameServer 地址
 		consumer.WithGroupName(conf.GroupPrefix+"_chat_consumer"), // 替换为您的消费者组名
+		consumer.WithConsumeFromWhere(consumer.ConsumeFromFirstOffset),
 	)
 	if err != nil {
 		panic(err)
 	}
 	tag := fmt.Sprintf("%s_chat_context", conf.Addr)
-	// 订阅带有指定 Tag 的消息
 	err = c.Subscribe("chatMessage", consumer.MessageSelector{
 		Type:       consumer.TAG,
 		Expression: tag, // 指定要订阅的 Tag
 	}, func(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
 		for _, msg := range msgs {
-			fmt.Printf("接收到消息: %s\n", string(msg.Body))
+			var (
+				ReceiveMsg utils.MqMsg
+				msgBody    handler.ReplyMsg
+			)
+			err = json.Unmarshal(msg.Body, &ReceiveMsg)
+			if err != nil {
+				fmt.Printf("消息解析失败")
+				continue
+			}
+
+			err = json.Unmarshal(ReceiveMsg.Body, &msgBody)
+			if err != nil {
+				fmt.Printf("消息解析失败")
+				continue
+			}
+
+			switch ReceiveMsg.Type {
+			case consts.MQ_MSG_TYEP_MEMBER:
+				mId, err := strconv.Atoi(ReceiveMsg.SendTo)
+				if err != nil {
+					fmt.Printf("消息解析失败")
+					continue
+				}
+				err = handler.SendMsgByMemberId(h, uint(mId), msgBody)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+				break
+			}
+
 		}
 		return consumer.ConsumeSuccess, nil
 	})
@@ -85,13 +125,14 @@ func NewMqConsumer(conf *conf.RocketMq) (rocketmq.PushConsumer, string) {
 }
 
 // NewData .
-func NewData(r *redis.Client, p rocketmq.Producer, c rocketmq.PushConsumer, mqTag string, logger log.Logger, confData *conf.Server) (*Data, func(), error) {
+func NewData(r *redis.Client, p rocketmq.Producer, c rocketmq.PushConsumer, mqTag string, logger log.Logger, confData *conf.Server, clientManager *handler.ClientManager) (*Data, func(), error) {
 	logHelper := log.NewHelper(logger)
 	cleanup := func() {
 		logHelper.Info("closing the data resources")
 		_ = p.Shutdown()
 		_ = c.Shutdown()
-		_ = r.Shutdown(context.Background())
+		_ = r.Close()
+		//_ = r.Shutdown(context.Background())
 	}
 	IP, _ := utils.GetLocalIP()
 
@@ -105,11 +146,12 @@ func NewData(r *redis.Client, p rocketmq.Producer, c rocketmq.PushConsumer, mqTa
 		panic("端口信息错误")
 	}
 	return &Data{
-		log:   logHelper,
-		p:     p,
-		r:     r,
-		IP:    IP,
-		mqTag: mqTag,
-		Port:  port,
+		log:           logHelper,
+		p:             p,
+		r:             r,
+		IP:            IP,
+		mqTag:         mqTag,
+		Port:          port,
+		clientManager: clientManager,
 	}, cleanup, nil
 }

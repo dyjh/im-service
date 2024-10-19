@@ -37,7 +37,7 @@ message CancelGroupReply {}
 
 message SendMsgRequest {
 	uint64 member_id = 1;
-	repeated bytes content = 2;
+	string content = 2;
 }
 
 message SendMsgReply {}

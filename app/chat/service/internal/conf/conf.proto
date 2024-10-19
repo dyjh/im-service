@@ -11,6 +11,7 @@ message Bootstrap {
   Websocket websocket = 3;
   Trace trace = 4;
   RocketMq rocketMq = 5;
+  Log log = 6;
 }
 
 message Server {
@@ -69,4 +70,8 @@ message Registry {
 message RocketMq {
   string addr = 1;
   string groupPrefix = 2;
+}
+
+message Log {
+  string level = 1;
 }

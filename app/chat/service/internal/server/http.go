@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/gin-gonic/gin"
 	kgin "github.com/go-kratos/gin"
 	"github.com/go-kratos/kratos/v2/log"
@@ -15,7 +14,6 @@ import (
 	"github.com/go-kratos/kratos/v2/middleware/validate"
 	"github.com/go-kratos/kratos/v2/transport"
 	"github.com/go-kratos/kratos/v2/transport/http"
-	"github.com/go-redis/redis/v8"
 	"im-service/app/chat/service/cmd/service/handler"
 	"im-service/app/chat/service/internal/conf"
 )
@@ -30,7 +28,7 @@ func customMiddleware(handler middleware.Handler) middleware.Handler {
 	}
 }
 
-func NewHTTPServer(c *conf.Server, r *redis.Client, producer rocketmq.Producer, logger log.Logger) *http.Server {
+func NewHTTPServer(c *conf.Server, logger log.Logger, h *handler.Handler) *http.Server {
 
 	var opts = []http.ServerOption{
 		http.Middleware(
@@ -40,14 +38,6 @@ func NewHTTPServer(c *conf.Server, r *redis.Client, producer rocketmq.Producer, 
 			metadata.Server(),
 			logging.Server(logger),
 		),
-
-		/*http.Filter(handlers.CORS(
-			handlers.AllowedHeaders([]string{"X-Requested-With", "Content-Type", "Authorization", "Platform", "Terminal"}),
-			handlers.AllowedMethods([]string{"GET", "POST", "PUT", "HEAD", "OPTIONS"}),
-			handlers.AllowedOrigins([]string{"*"}),
-		)),*/
-		/*http.ResponseEncoder(response.ResponseEncoder),
-		http.ErrorEncoder(response.ErrorEncoder),*/
 	}
 
 	if c.Http.Network != "" {
@@ -65,7 +55,7 @@ func NewHTTPServer(c *conf.Server, r *redis.Client, producer rocketmq.Producer, 
 	router := gin.Default()
 	// 使用kratos中间件
 	router.Use(kgin.Middlewares(recovery.Recovery(), customMiddleware))
-	h := handler.NewHandler(r, producer, logger)
+
 	router.GET("/ws", h.WsHandler)
 	httpSrv.HandlePrefix("/", router)
 

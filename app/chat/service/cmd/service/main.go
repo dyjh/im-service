@@ -4,9 +4,9 @@ import (
 	"flag"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/registry"
-	"im-service/app/chat/service/cmd/service/handler"
 	"im-service/app/chat/service/internal/conf"
 	"os"
+	"strings"
 
 	"github.com/go-kratos/kratos/v2/config"
 	"github.com/go-kratos/kratos/v2/config/file"
@@ -80,6 +80,30 @@ func main() {
 		panic(err)
 	}
 
+	logLevel := strings.ToLower(bc.Log.Level)
+	var loggerSetLevel log.Level
+	switch logLevel {
+	case "debug":
+		loggerSetLevel = log.LevelDebug
+		break
+	case "info":
+		loggerSetLevel = log.LevelInfo
+		break
+	case "warn":
+		loggerSetLevel = log.LevelWarn
+		break
+	case "error":
+		loggerSetLevel = log.LevelError
+		break
+	case "fatal":
+		loggerSetLevel = log.LevelFatal
+		break
+	default:
+		panic("日志配置错误")
+	}
+
+	logger = log.NewFilter(logger, log.FilterLevel(loggerSetLevel))
+
 	/*exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(bc.Trace.Endpoint)))
 	if err != nil {
 		panic(err)
@@ -92,12 +116,12 @@ func main() {
 	)*/
 
 	//app, cleanup, err := wireApp(&rc, bc.Server, bc.Data, logger, tp)
-	app, rdb, cleanup, err := wireApp(&rc, bc.RocketMq, bc.Server, bc.Data, logger)
+	app, h, cleanup, err := wireApp(&rc, &bc, logger, logLevel)
 	if err != nil {
 		panic(err)
 	}
 	defer cleanup()
-	go handler.Manager.WebSocketStart(bc.Websocket, logger, rdb)
+	go h.ClientManager.WebSocketStart(bc.Websocket, logger)
 	// start and wait for stop signal
 	if err := app.Run(); err != nil {
 		panic(err)

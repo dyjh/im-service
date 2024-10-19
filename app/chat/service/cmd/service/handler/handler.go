@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
-	"im-service/app/chat/service/cmd/service/consts"
+	"im-service/app/chat/service/internal/consts"
 	"im-service/app/chat/service/utils"
 	"net/http"
 	"strconv"
@@ -53,9 +54,9 @@ type Client struct {
 	GroupId            string
 	GroupNo            string
 	Socket             *websocket.Conn `json:"-"`
-	State              int
+	state              int
 	Send               chan ChatContent `json:"-"`
-	HeartbeatFailTimes int              `json:"-"`
+	heartbeatFailTimes int
 	ticker             *time.Ticker
 	ReadDeadline       time.Duration `json:"-"`
 	WriteDeadline      time.Duration `json:"-"`
@@ -69,36 +70,37 @@ type ClientManager struct {
 	Reply               chan *Client
 	Register            chan *Client
 	Unregister          chan *Client
+	RedisClient         *redis.Client
 }
 
-var Manager = ClientManager{
+/*var Manager = ClientManager{
 	Clients:             make(map[string]*Client), // 参与连接的用户，出于性能的考虑，需要设置最大连接数
 	MapUserIdToClientId: make(map[uint]string),
 	Register:            make(chan *Client),
 	Reply:               make(chan *Client),
 	Unregister:          make(chan *Client),
-}
+}*/
 
 // 消息发送类型
 const (
-	SendRes      = "SendRes"      // 消息发送结果
-	ChatResponse = "ChatResponse" // 消息发送结果
-	Heart        = "Ping"         // 心跳
-	MsgReceive   = "MsgReceive"   // 消息接收
-	Refresh      = "Refresh"      // 刷新消息列表
+	SendRes    = "SendRes"    // 消息发送结果
+	Heart      = "Ping"       // 心跳
+	MsgReceive = "MsgReceive" // 消息接收
+	SysMsg     = "SysMsg"     // 消息接收
+	Refresh    = "Refresh"    // 刷新消息列表
 )
 
 type Handler struct {
-	redisClient *redis.Client
-	log         *log.Helper
-	producer    rocketmq.Producer
+	log           *log.Helper
+	producer      rocketmq.Producer
+	ClientManager *ClientManager
 }
 
-func NewHandler(redisClient *redis.Client, producer rocketmq.Producer, logger log.Logger) *Handler {
+func NewHandler(producer rocketmq.Producer, logger log.Logger, manager *ClientManager) *Handler {
 	return &Handler{
-		redisClient: redisClient,
-		log:         log.NewHelper(logger),
-		producer:    producer,
+		log:           log.NewHelper(logger),
+		producer:      producer,
+		ClientManager: manager,
 	}
 }
 
@@ -123,33 +125,19 @@ func (h *Handler) WsHandler(ctx *gin.Context) {
 		Uid:           getClientUid(),
 		Socket:        conn,
 		Send:          make(chan ChatContent),
-		State:         1,
+		state:         1,
 		ReadDeadline:  time.Duration(wsConf.ReadDeadline) * time.Second,
 		WriteDeadline: time.Duration(wsConf.WriteDeadline) * time.Second,
 	}
 	// 用户会话注册到用户管理上
-	Manager.Register <- newClient
+	h.ClientManager.Register <- newClient
 
 	// ---------------------------------------- //
 	go newClient.read(ctx, h)
-	go newClient.write()
+	go newClient.write(h)
 
 	// 启动心跳服务
 	newClient.HeartBeat()
-}
-
-func SendMsgByUserId(userId uint, msg []byte) error {
-	if ClientId, ok := Manager.MapUserIdToClientId[userId]; ok {
-		UserClient := Manager.Clients[ClientId]
-		err := UserClient.sendByte(websocket.TextMessage, msg)
-		if err != nil {
-			return err
-		}
-	} else {
-		return fmt.Errorf("客户端不存在")
-	}
-
-	return nil
 }
 
 func getClientUid() string {
@@ -172,39 +160,35 @@ func (c *Client) read(ctx *gin.Context, h *Handler) {
 		err := recover()
 		if err != nil {
 			if val, ok := err.(error); ok {
-				//global.GVA_LOG.Error(consts.WebsocketReadFailMsg, zap.Error(val))
-				fmt.Println("程序异常：" + val.Error())
+				h.log.Error("程序异常：" + val.Error())
 			}
 		}
 		_ = c.Socket.Close()
 	}()
 
 	for {
-
+		isClose := false
 		// 使用 ReadMessage() 读取原始消息字节
 		_, rawMsg, err := c.Socket.ReadMessage()
-		if string(rawMsg) == "" {
+		if err != nil {
+			// 处理关闭错误和其他类型的错误
+			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				h.log.Info("客户端已断开连接:", c.Uid)
+				return
+			}
+			h.log.Error("读取消息错误:", err)
+			return
+		}
+		if len(rawMsg) == 0 {
 			continue
 		}
-		// 将原始消息打印为字符串
-		//global.GVA_LOG.Info("收到的原始请求: " + string(rawMsg))
+		h.log.Debug("收到的原始请求: " + string(rawMsg))
 
 		sendMsg := new(SendMsg)
-		err = c.Socket.ReadJSON(&sendMsg)
-		isClose := false
-
+		err = json.Unmarshal(rawMsg, &sendMsg)
 		if err != nil {
-			//global.GVA_LOG.Error("格式错误", zap.Error(err))
-			if err.Error() == "websocket: close 1005 (no status)" {
-				//global.GVA_LOG.Info(consts.WebsocketClientLogoutMsg, zap.String("ClientID", c.Uid))
-				isClose = true
-			}
-			sendErr(c, "数据格式不正确", isClose)
-			if isClose {
-				return
-			} else {
-				continue
-			}
+			sendErr(h, c, "数据格式不正确", false)
+			continue
 		}
 
 		if sendMsg.ContentType == "pong" {
@@ -212,22 +196,22 @@ func (c *Client) read(ctx *gin.Context, h *Handler) {
 		}
 
 		if sendMsg.ContentType != "text" {
-			sendErr(c, "消息格式错误", false)
+			sendErr(h, c, "消息格式错误", false)
 			continue
 		}
 
 		if sendMsg.Content == "" {
-			sendErr(c, "不能发送空消息", false)
+			sendErr(h, c, "不能发送空消息", false)
 			continue
 		}
 
 		if c.MemberId == 0 {
-			sendErr(c, "请先绑定用户", false)
+			sendErr(h, c, "请先绑定用户", false)
 			continue
 		}
 
 		if c.GroupId == "" {
-			sendErr(c, "未指定消息发送对象", false)
+			sendErr(h, c, "未指定消息发送对象", false)
 			continue
 		}
 
@@ -245,7 +229,7 @@ func (c *Client) read(ctx *gin.Context, h *Handler) {
 
 		// 消息发送id
 		var SendIds = make([]uint64, 10, 50)
-		for _, client := range Manager.Clients {
+		for _, client := range h.ClientManager.Clients {
 			if client.GroupId == c.GroupId && client.MemberId != c.MemberId {
 				client.Send <- MsgContent
 				SendIds = append(SendIds, uint64(client.MemberId))
@@ -253,20 +237,41 @@ func (c *Client) read(ctx *gin.Context, h *Handler) {
 		}
 
 		// 根据GroupId获取组成员
-		GroupClients, err := utils.GetUsersInGroup(ctx, h.redisClient, c.GroupId)
+		GroupClients, err := utils.GetUsersInGroup(ctx, h.ClientManager.RedisClient, c.GroupId)
 		if err != nil {
-			sendErr(c, "聊天组数据错误，请联系管理员", isClose)
+			h.log.Errorf("聊天组数据错误:%s", err.Error())
+			sendErr(h, c, "聊天组数据错误，请联系管理员", isClose)
 			return
 		}
+		// 收集组内在线成员id
 		GroupOnlineMemberIds := make([]int, 0, 4)
+
+		Ip, _ := utils.GetLocalIP()
+
 		for ClientMemberId, clientInfo := range GroupClients {
 			mId, _ := strconv.Atoi(ClientMemberId)
 			GroupOnlineMemberIds = append(GroupOnlineMemberIds, mId)
-			err = utils.SendMqMsg(h.producer, "chatMessage", clientInfo.MQTag, ContentBytes)
-			if err != nil {
-				sendErr(c, "消息发送失败，请联系管理员", isClose)
-				return
+			if Ip == clientInfo.IP {
+				clientId := h.ClientManager.MapUserIdToClientId[uint(mId)]
+				if clientId != "" {
+					client := h.ClientManager.Clients[clientId]
+
+					err := client.sendByte(websocket.TextMessage, ContentBytes)
+					if err != nil {
+						h.log.Errorf("消息发送失败:%s", err.Error())
+						sendErr(h, c, "消息发送失败，请联系管理员", isClose)
+						return
+					}
+				}
+			} else {
+				err = utils.SendMqMsg(h.producer, "chatMessage", clientInfo.MQTag, ContentBytes)
+				if err != nil {
+					h.log.Errorf("消息发送失败:%s", err.Error())
+					sendErr(h, c, "消息发送失败，请联系管理员", isClose)
+					return
+				}
 			}
+
 		}
 
 		replyMsg := ReplyMsg{
@@ -283,13 +288,12 @@ func (c *Client) read(ctx *gin.Context, h *Handler) {
 }
 
 // 消息发出
-func (c *Client) write() {
+func (c *Client) write(h *Handler) {
 	defer func() {
 		err := recover()
 		if err != nil {
 			if val, ok := err.(error); ok {
-				//global.GVA_LOG.Error(consts.WebsocketSendMessageFailMsg, zap.Error(val))
-				fmt.Println("程序异常" + val.Error())
+				h.log.Errorw(consts.WebsocketSendMessageFailMsg, val)
 			}
 		}
 		c.ticker.Stop()
@@ -302,7 +306,7 @@ func (c *Client) write() {
 				_ = c.sendByte(websocket.CloseMessage, []byte{})
 				return
 			}
-			//global.GVA_LOG.Info("接收消息：", zap.Uint("memberId", c.MemberId), zap.Any("message", message))
+			h.log.Debugw("接收消息：", "memberId", c.MemberId, "message", message)
 			replyMsg := ReplyMsg{
 				Code:    consts.WsSuccess,
 				Type:    MsgReceive,
@@ -313,7 +317,7 @@ func (c *Client) write() {
 			_ = c.sendByte(websocket.TextMessage, msg)
 		case <-c.ticker.C:
 			// 心跳计时器
-			if c.State == 1 {
+			if c.state == 1 {
 				heartMsg, _ := json.Marshal(ReplyMsg{
 					Code:    consts.WsSuccess,
 					Type:    Heart,
@@ -322,25 +326,16 @@ func (c *Client) write() {
 				err := c.sendByte(websocket.TextMessage, heartMsg)
 
 				if err != nil {
-					fmt.Println(c.Uid)
-					fmt.Println("心跳包发送失败：" + err.Error())
-
-					data1, _ := json.Marshal(Manager.Clients)
-					fmt.Println("客户端数据打印：" + string(data1))
-
-					data2, _ := json.Marshal(Manager.MapUserIdToClientId)
-					fmt.Println("用户id映射打印：" + string(data2))
-
-					c.HeartbeatFailTimes++
-					if c.HeartbeatFailTimes > int(wsConf.HeartbeatFailMaxTimes) {
-						c.State = 0
-						Manager.Unregister <- c
+					c.heartbeatFailTimes++
+					if c.heartbeatFailTimes > int(wsConf.HeartbeatFailMaxTimes) {
+						c.state = 0
+						h.ClientManager.Unregister <- c
 						return
 					}
 				} else {
 
 					// ping通则清空失败次数
-					c.HeartbeatFailTimes = 0
+					c.heartbeatFailTimes = 0
 				}
 			} else {
 				return
@@ -350,7 +345,7 @@ func (c *Client) write() {
 }
 
 // 错误信息返回
-func sendErr(c *Client, msg string, isClose bool) {
+func sendErr(h *Handler, c *Client, msg string, isClose bool) {
 	// 向前端返回数据格式不正确的状态码和消息
 	errMsg, _ := json.Marshal(ReplyMsg{
 		Code:   consts.WsError,
@@ -360,14 +355,25 @@ func sendErr(c *Client, msg string, isClose bool) {
 	_ = c.sendByte(websocket.TextMessage, errMsg)
 
 	if isClose {
-		Manager.Unregister <- c
+		h.ClientManager.Unregister <- c
 		_ = c.Socket.Close()
 	}
 }
 
+func SendMsgByMemberId(h *Handler, memberId uint, content interface{}) error {
+	clientId, isExist := h.ClientManager.MapUserIdToClientId[memberId]
+	if isExist {
+		client := h.ClientManager.Clients[clientId]
+		return client.SendMessage(content)
+	} else {
+		return errors.New(consts.GRPC_ERROR, "客户端不存在", "客户端不存在")
+	}
+}
+
 // SendMessage 发送字符串消息
-func (c *Client) SendMessage(messageType int, message string) error {
-	return c.sendByte(messageType, []byte(message))
+func (c *Client) SendMessage(message interface{}) error {
+	jsonContent, _ := json.Marshal(message)
+	return c.sendByte(websocket.TextMessage, jsonContent)
 }
 
 // 发送消息基础方法

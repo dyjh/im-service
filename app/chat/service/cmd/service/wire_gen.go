@@ -7,7 +7,7 @@
 package main
 
 import (
-	"github.com/go-redis/redis/v8"
+	"im-service/app/chat/service/cmd/service/handler"
 	"im-service/app/chat/service/internal/biz"
 	"im-service/app/chat/service/internal/conf"
 	"im-service/app/chat/service/internal/data"
@@ -24,22 +24,31 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(registry *conf.Registry, confMq *conf.RocketMq, confServer *conf.Server, confData *conf.Data, logger log.Logger) (*kratos.App, *redis.Client, func(), error) {
-	redis := data.NewRedisClient(confData)
-	producer := data.NewMqProducer(confMq)
-	consumer, mqTag := data.NewMqConsumer(confMq)
-	dataData, cleanup, err := data.NewData(redis, producer, consumer, mqTag, logger, confServer)
+func wireApp(registry *conf.Registry, confBootstrup *conf.Bootstrap, logger log.Logger, logLevel string) (*kratos.App, *handler.Handler, func(), error) {
+	redis := data.NewRedisClient(confBootstrup.Data)
+	producer := data.NewMqProducer(confBootstrup.RocketMq, logLevel)
+	clientManager := &handler.ClientManager{
+		Clients:             make(map[string]*handler.Client), // 参与连接的用户，出于性能的考虑，需要设置最大连接数
+		MapUserIdToClientId: make(map[uint]string),
+		Register:            make(chan *handler.Client),
+		Reply:               make(chan *handler.Client),
+		Unregister:          make(chan *handler.Client),
+		RedisClient:         redis,
+	}
+	h := handler.NewHandler(producer, logger, clientManager)
+	consumer, mqTag := data.NewMqConsumer(confBootstrup.RocketMq, logLevel, h)
+	dataData, cleanup, err := data.NewData(redis, producer, consumer, mqTag, logger, confBootstrup.Server, clientManager)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	wsRepo := data.NewWsRepo(dataData, logger)
 	WsUseCase := biz.NewWsUseCase(wsRepo, logger)
 	wsService := service.NewWsService(WsUseCase, logger)
-	grpcServer := server.NewGRPCServer(confServer, wsService, logger)
-	httpServer := server.NewHTTPServer(confServer, redis, producer, logger)
+	grpcServer := server.NewGRPCServer(confBootstrup.Server, wsService, logger)
+	httpServer := server.NewHTTPServer(confBootstrup.Server, logger, h)
 	registrar := server.NewRegistrar(registry)
 	app := newApp(logger, grpcServer, httpServer, registrar)
-	return app, redis, func() {
+	return app, h, func() {
 		cleanup()
 	}, nil
 }
