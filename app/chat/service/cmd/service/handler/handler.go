@@ -73,14 +73,6 @@ type ClientManager struct {
 	RedisClient         *redis.Client
 }
 
-/*var Manager = ClientManager{
-	Clients:             make(map[string]*Client), // 参与连接的用户，出于性能的考虑，需要设置最大连接数
-	MapUserIdToClientId: make(map[uint]string),
-	Register:            make(chan *Client),
-	Reply:               make(chan *Client),
-	Unregister:          make(chan *Client),
-}*/
-
 // 消息发送类型
 const (
 	SendRes    = "SendRes"    // 消息发送结果
