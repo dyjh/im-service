@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  rmqnamesrv:
+    image: apache/rocketmq:latest
+    container_name: rmqnamesrv
+    ports:
+      - "9876:9876"
+    command: sh mqnamesrv
+    networks:
+      - rocketmq-network
+
+  rmqbroker:
+    image: apache/rocketmq:latest
+    container_name: rmqbroker
+    ports:
+      - "10911:10911"
+      - "10909:10909"
+    command: sh mqbroker -n rmqnamesrv:9876
+    environment:
+      - NAMESRV_ADDR=rmqnamesrv:9876
+    depends_on:
+      - rmqnamesrv
+    networks:
+      - rocketmq-network
+
+  rmq-console:
+    image: styletang/rocketmq-console-ng
+    container_name: rmq-console
+    ports:
+      - "8080:8080"
+    environment:
+      - JAVA_OPTS=-Drocketmq.namesrv.addr=rmqnamesrv:9876
+    depends_on:
+      - rmqnamesrv
+    networks:
+      - rocketmq-network
+
+networks:
+  rocketmq-network:
+    driver: bridge

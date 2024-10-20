@@ -1,108 +1,119 @@
 version: '3.8'
 
 services:
-  kong-database:
-    image: postgres:13
+  kong-ee-database:
+    image: postgres:11
+    container_name: kong-ee-database
+    networks:
+      kong-ee-net:
+        ipv4_address: 172.19.0.3
+    ports:
+      - "5432:5432"
+    volumes:
+      - kong-volume:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: kong
       POSTGRES_DB: kong
       POSTGRES_PASSWORD: kong
-    ports:
-      - "5432:5432"
-    networks:
-      kong-net:
-        ipv4_address: 172.21.0.3
-    volumes:
-      - kong-database-data:/var/lib/postgresql/data
-
-  consul:
-    image: hashicorp/consul:1.15.3  # 指定具体版本
-    command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0 -dns-port=8600 -recursor=8.8.8.8
-    environment:
-      CONSUL_BIND_INTERFACE: eth0
-    ports:
-      - "8500:8500"      # Consul UI 和 API
-      - "8600:8600/udp"  # DNS 服务
-    networks:
-      kong-net:
-        ipv4_address: 172.21.0.2
-    volumes:
-      - consul-data:/consul/data
 
   kong-migrations:
-    image: kong:3.0  # 指定具体版本
+    image: kong:3.0
+    container_name: kong-migrations
+    networks:
+      - kong-ee-net
     environment:
       KONG_DATABASE: postgres
-      KONG_PG_HOST: "172.21.0.3"
-      KONG_PG_USER: kong
+      KONG_PG_HOST: 172.19.0.3
       KONG_PG_PASSWORD: kong
-      KONG_PG_DATABASE: kong
-    command: kong migrations bootstrap
+      KONG_PASSWORD: kong
     depends_on:
-      - kong-database
+      - kong-ee-database
+    command: ["kong", "migrations", "bootstrap"]
+
+  consul:
+    image: hashicorp/consul:1.15.3
+    container_name: consul
     networks:
-      kong-net:
-        ipv4_address: 172.21.0.6
-    # 移除挂载 kong.yml
+      kong-ee-net:
+        ipv4_address: 172.19.0.6
+    ports:
+      - "8500:8500"
+      - "8300:8300"
+      - "8301:8301"
+      - "8302:8302"
+      - "8600:8600/udp"
+    command: ["consul", "agent", "-dev", "-client=0.0.0.0"]
 
   kong:
-    image: kong:3.0  # 指定具体版本
-    restart: always
+    image: kong:3.0
+    container_name: kong
+    networks:
+      - kong-ee-net
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+      - "8001:8001"
+      - "8444:8444"
     environment:
       KONG_DATABASE: postgres
-      KONG_PG_HOST: "172.21.0.3"
+      KONG_DNS_RESOLVER: "172.19.0.6:8600"
+      KONG_PG_HOST: "172.19.0.3"
       KONG_PG_USER: kong
       KONG_PG_PASSWORD: kong
-      KONG_PG_DATABASE: kong
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: "0.0.0.0:8001, 0.0.0.0:8444 ssl"
-      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
-      KONG_PLUGINS: bundled
-      KONG_DNS_RESOLVER: "172.21.0.2:8600,172.21.0.1:53"  # 添加外部 DNS 解析器
-      KONG_PROXY_ACCESS_LOG: "/dev/stdout"
-      KONG_ADMIN_ACCESS_LOG: "/dev/stdout"
-      KONG_PROXY_ERROR_LOG: "/dev/stderr"
-      KONG_ADMIN_ERROR_LOG: "/dev/stderr"
-      KONG_LOG_LEVEL: "debug"  # 启用详细日志
-    ports:
-      - "8000:8000"      # Proxy HTTP
-      - "8443:8443"      # Proxy HTTPS
-      - "8001:8001"      # Admin API
-      - "8444:8444"      # Admin API SSL
     depends_on:
       - kong-migrations
       - consul
+
+  konga-database:
+    image: postgres:11
+    container_name: konga-database
     networks:
-      kong-net:
-        ipv4_address: 172.21.0.4
-    # 移除挂载 kong.yml
+      - kong-ee-net
+    ports:
+      - "5433:5432"
+    volumes:
+      - konga-postgresql:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: konga
+      POSTGRES_DB: konga
+      POSTGRES_PASSWORD: konga
+
+  konga-prepare:
+    image: pantsel/konga:latest
+    container_name: konga-prepare
+    networks:
+      - kong-ee-net
+    depends_on:
+      - konga-database
+    command: ["-c", "prepare", "-a", "postgres", "-u", "postgres://konga:konga@konga-database:5432/konga"]
 
   konga:
     image: pantsel/konga:latest
-    restart: always
-    environment:
-      KONGA_DB_ADAPTER: "postgres"
-      KONGA_DB_HOST: "172.21.0.3"  # 使用静态 IP
-      KONGA_DB_USER: "kong"
-      KONGA_DB_PASSWORD: "kong"
-      KONGA_DB_DATABASE: "kong"
-      NODE_ENV: "production"
-      TOKEN_SECRET: "your_secure_random_secret"  # 请更改为一个安全的随机字符串
-    ports:
-      - "1337:1337"  # Konga UI
-    depends_on:
-      - kong
-      - kong-database
+    container_name: konga
     networks:
-      kong-net:
-        ipv4_address: 172.21.0.5
+      - kong-ee-net
+    ports:
+      - "1337:1337"
+    environment:
+      DB_ADAPTER: postgres
+      DB_URI: postgres://konga:konga@konga-database:5432/konga
+      NODE_ENV: production
+      DB_PASSWORD: konga
+    depends_on:
+      - konga-prepare
 
 volumes:
-  kong-database-data:
-  consul-data:
+  kong-volume:
+  konga-postgresql:
 
 networks:
-  kong-net:
+  kong-ee-net:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.21.0.0/16
+        - subnet: 172.19.0.0/24
