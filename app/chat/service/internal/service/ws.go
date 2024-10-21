@@ -18,3 +18,11 @@ func (ws *WsService) CancelGroup(ctx context.Context, req *pb.CancelGroupRequest
 func (ws *WsService) SendMsg(ctx context.Context, req *pb.SendMsgRequest) (*pb.SendMsgReply, error) {
 	return ws.wc.SendMsg(ctx, req)
 }
+
+func (ws *WsService) DelGroupColl(ctx context.Context, req *pb.DelGroupCollRequest) (*pb.DelGroupCollReply, error) {
+	return ws.wc.DelGroupColl(ctx, req)
+}
+
+func (ws *WsService) GetGroupHistory(ctx context.Context, req *pb.GetGroupHistoryRequest) (*pb.GetGroupHistoryReply, error) {
+	return ws.wc.GetGroupHistory(ctx, req)
+}

@@ -26,6 +26,8 @@ import (
 // wireApp init kratos application.
 func wireApp(registry *conf.Registry, confBootstrup *conf.Bootstrap, logger log.Logger, logLevel string) (*kratos.App, *handler.Handler, func(), error) {
 	redis := data.NewRedisClient(confBootstrup.Data)
+	mongo := data.NewMongo(confBootstrup.Data)
+	mysql := data.NewMysql(confBootstrup.Data, logger)
 	producer := data.NewMqProducer(confBootstrup.RocketMq, logLevel)
 	clientManager := &handler.ClientManager{
 		Clients:             make(map[string]*handler.Client), // 参与连接的用户，出于性能的考虑，需要设置最大连接数
@@ -34,10 +36,12 @@ func wireApp(registry *conf.Registry, confBootstrup *conf.Bootstrap, logger log.
 		Reply:               make(chan *handler.Client),
 		Unregister:          make(chan *handler.Client),
 		RedisClient:         redis,
+		MongoDb: mongo,
+		Mysql: mysql,
 	}
 	h := handler.NewHandler(producer, logger, clientManager)
 	consumer, mqTag := data.NewMqConsumer(confBootstrup.RocketMq, logLevel, h)
-	dataData, cleanup, err := data.NewData(redis, producer, consumer, mqTag, logger, confBootstrup.Server, clientManager)
+	dataData, cleanup, err := data.NewData(mongo, mysql, redis, producer, consumer, mqTag, logger, confBootstrup.Server, clientManager)
 	if err != nil {
 		return nil, nil, nil, err
 	}

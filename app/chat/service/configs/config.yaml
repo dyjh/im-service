@@ -6,9 +6,11 @@ server:
     addr: 0.0.0.0:9800
     timeout: 1s
 data:
-  database:
-    driver: mysql
-    source: root:root@tcp(127.0.0.1:3306)/test?parseTime=True&loc=Local
+  mysql:
+    source: "test_im:FFbKmWXT2YDEDzSZ@tcp(127.0.0.1:3306)/test_im?parseTime=true"
+  mongodb:
+    uri: "mongodb://chat_msg:kCTsS6xzkWMby8YD@172.16.1.12:27017/chat_msg?authSource=chat_msg"
+    database: "chat_msg"
   redis:
     addr: 127.0.0.1:6379
     read_timeout: 0.2s

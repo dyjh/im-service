@@ -57,9 +57,6 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, h *handler.Handler) *http.
 	router.Use(kgin.Middlewares(recovery.Recovery(), customMiddleware))
 
 	router.GET("/ws", h.WsHandler)
-	router.GET("/hellow", func(c *gin.Context) {
-		fmt.Println(111)
-	})
 	httpSrv.HandlePrefix("/", router)
 
 	return httpSrv

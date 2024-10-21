@@ -10,23 +10,32 @@ import (
 	"github.com/apache/rocketmq-client-go/v2/producer"
 	"github.com/apache/rocketmq-client-go/v2/rlog"
 	"github.com/go-redis/redis/v8"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 	"im-service/app/chat/service/cmd/service/handler"
 	"im-service/app/chat/service/internal/conf"
 	"im-service/app/chat/service/internal/consts"
+	"im-service/app/chat/service/internal/model"
 	"im-service/app/chat/service/utils"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/wire"
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewData, NewWsRepo)
+var ProviderSet = wire.NewSet(NewData, NewWsRepo, NewMongo, NewMysql, NewMqProducer, NewMqConsumer)
 
 // Data .
 type Data struct {
 	// TODO wrapped database client
+	mongo         *mongo.Database
+	mysqlClient   *gorm.DB
 	log           *log.Helper
 	p             rocketmq.Producer
 	r             *redis.Client
@@ -43,6 +52,33 @@ func NewRedisClient(c *conf.Data) *redis.Client {
 		Password: c.Redis.Password,
 		DB:       int(c.Redis.Db),
 	})
+}
+
+func NewMongo(conf *conf.Data) *mongo.Database {
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(conf.Mongodb.Uri))
+	if err != nil {
+		panic(err)
+	}
+	err = client.Ping(ctx, readpref.Primary())
+	if err != nil {
+		panic(err)
+	}
+	return client.Database(conf.Mongodb.Database)
+}
+
+func NewMysql(conf *conf.Data, logger log.Logger) *gorm.DB {
+	log := log.NewHelper(log.With(logger, "module", "order-service/data/gorm"))
+
+	db, err := gorm.Open(mysql.Open(conf.Mysql.Source), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("failed opening connection to mysql: %v", err)
+	}
+
+	if err := db.AutoMigrate(&model.GroupBind{}); err != nil {
+		log.Fatal(err)
+	}
+	return db
 }
 
 func NewMqProducer(conf *conf.RocketMq, logLevel string) rocketmq.Producer {
@@ -102,11 +138,18 @@ func NewMqConsumer(conf *conf.RocketMq, logLevel string, h *handler.Handler) (ro
 					fmt.Printf("消息解析失败")
 					continue
 				}
-				err = handler.SendMsgByMemberId(h, uint(mId), msgBody)
-				if err != nil {
-					fmt.Println(err)
-					continue
+
+				clientId, isExist := h.ClientManager.MapUserIdToClientId[uint(mId)]
+				if isExist {
+					sendMsg := handler.ReplyMsg{
+						Code:    consts.WsSuccess,
+						Type:    consts.MsgReceive,
+						Content: msgBody,
+					}
+					client := h.ClientManager.Clients[clientId]
+					client.Send <- sendMsg
 				}
+
 				break
 			}
 
@@ -125,7 +168,7 @@ func NewMqConsumer(conf *conf.RocketMq, logLevel string, h *handler.Handler) (ro
 }
 
 // NewData .
-func NewData(r *redis.Client, p rocketmq.Producer, c rocketmq.PushConsumer, mqTag string, logger log.Logger, confData *conf.Server, clientManager *handler.ClientManager) (*Data, func(), error) {
+func NewData(database *mongo.Database, mysql *gorm.DB, r *redis.Client, p rocketmq.Producer, c rocketmq.PushConsumer, mqTag string, logger log.Logger, confData *conf.Server, clientManager *handler.ClientManager) (*Data, func(), error) {
 	logHelper := log.NewHelper(logger)
 	cleanup := func() {
 		logHelper.Info("closing the data resources")
@@ -146,6 +189,8 @@ func NewData(r *redis.Client, p rocketmq.Producer, c rocketmq.PushConsumer, mqTa
 		panic("端口信息错误")
 	}
 	return &Data{
+		mongo:         database,
+		mysqlClient:   mysql,
 		log:           logHelper,
 		p:             p,
 		r:             r,

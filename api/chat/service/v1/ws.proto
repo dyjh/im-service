@@ -13,6 +13,9 @@ service Ws {
 	rpc BindGroup (BindGroupRequest) returns (BindGroupReply);
 	rpc CancelGroup (CancelGroupRequest) returns (CancelGroupReply);
 	rpc SendMsg (SendMsgRequest) returns (SendMsgReply);
+
+	rpc DelGroupColl (DelGroupCollRequest) returns (DelGroupCollReply);
+	rpc GetGroupHistory (GetGroupHistoryRequest) returns (GetGroupHistoryReply);
 }
 
 message BindMemberRequest {
@@ -41,3 +44,32 @@ message SendMsgRequest {
 }
 
 message SendMsgReply {}
+
+message DelGroupCollRequest {
+	string group_id = 1;
+	uint64 member_id = 2;
+}
+
+message DelGroupCollReply {
+
+}
+
+message GetGroupHistoryRequest {
+	string group_id = 1;
+	uint64 member_id = 2;
+	string last_id = 3;
+	uint64 page_size = 4;
+}
+
+message MsgHistory {
+	string message_id = 1;
+	uint64 member_id = 2;
+	string content_type = 3;
+	string content = 4;
+	string create_at = 5;
+	string id = 7;
+}
+
+message GetGroupHistoryReply {
+	repeated MsgHistory msg_list = 1;
+}

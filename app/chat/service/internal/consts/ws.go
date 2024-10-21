@@ -6,6 +6,15 @@ const (
 	WsEnd     = 101
 )
 
+// 消息发送类型
+const (
+	SendRes    = "SendRes"    // 消息发送结果
+	Heart      = "Ping"       // 心跳
+	MsgReceive = "MsgReceive" // 消息接收
+	SysMsg     = "SysMsg"     // 消息接收
+	Refresh    = "Refresh"    // 刷新消息列表
+)
+
 const (
 	// websocket相关错误
 	WebsocketOnOpenFailMsg      string = "websocket连接失败"

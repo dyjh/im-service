@@ -30,6 +30,8 @@ type WsRepo interface {
 	BindGroup(context.Context, *pb.BindGroupRequest) (*pb.BindGroupReply, error)
 	CancelGroup(context.Context, *pb.CancelGroupRequest) (*pb.CancelGroupReply, error)
 	SendMsg(context.Context, *pb.SendMsgRequest) (*pb.SendMsgReply, error)
+	DelGroupColl(context.Context, *pb.DelGroupCollRequest) (*pb.DelGroupCollReply, error)
+	GetGroupHistory(context.Context, *pb.GetGroupHistoryRequest) (*pb.GetGroupHistoryReply, error)
 }
 
 func (wc *WsUseCase) BindMember(ctx context.Context, req *pb.BindMemberRequest) (*pb.BindMemberReply, error) {
@@ -46,4 +48,12 @@ func (wc *WsUseCase) CancelGroup(ctx context.Context, req *pb.CancelGroupRequest
 
 func (wc *WsUseCase) SendMsg(ctx context.Context, req *pb.SendMsgRequest) (*pb.SendMsgReply, error) {
 	return wc.repo.SendMsg(ctx, req)
+}
+
+func (wc *WsUseCase) DelGroupColl(ctx context.Context, req *pb.DelGroupCollRequest) (*pb.DelGroupCollReply, error) {
+	return wc.repo.DelGroupColl(ctx, req)
+}
+
+func (wc *WsUseCase) GetGroupHistory(ctx context.Context, req *pb.GetGroupHistoryRequest) (*pb.GetGroupHistoryReply, error) {
+	return wc.repo.GetGroupHistory(ctx, req)
 }

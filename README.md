@@ -1,6 +1,6 @@
-# Kratos Project Template
+# 基于 Kratos 框架编写的一个分布式 IM 
 
-## Install Kratos
+## Kratos
 ```
 go install github.com/go-kratos/kratos/cmd/kratos/v2@latest
 ```

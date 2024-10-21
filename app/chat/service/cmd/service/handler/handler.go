@@ -11,7 +11,11 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"gorm.io/gorm"
 	"im-service/app/chat/service/internal/consts"
+	"im-service/app/chat/service/internal/model"
 	"im-service/app/chat/service/utils"
 	"net/http"
 	"strconv"
@@ -22,23 +26,16 @@ import (
 )
 
 type SendMsg struct {
-	//ChatType    string `json:"chat_type"`
-	//To          uint   `json:"to"`
 	Content     string `json:"content"`
 	ContentType string `json:"content_type"`
 }
 
-type SenderInfo struct {
-	Avatar   string `json:"avatar"`
-	Nickname string `json:"nickname"`
-}
-
 type ChatContent struct {
-	MessageId   string     `json:"message_id"`
-	ContentType string     `json:"content_type"`
-	Content     string     `json:"content"`
-	CreateAt    time.Time  `json:"create_at"`
-	SenderInfo  SenderInfo `json:"sender_info"`
+	MessageId   string    `json:"message_id"`
+	MemberId    uint64    `json:"member_id"`
+	ContentType string    `json:"content_type"`
+	Content     string    `json:"content"`
+	CreateAt    time.Time `json:"create_at"`
 }
 
 type ReplyMsg struct {
@@ -55,7 +52,7 @@ type Client struct {
 	GroupNo            string
 	Socket             *websocket.Conn `json:"-"`
 	state              int
-	Send               chan ChatContent `json:"-"`
+	Send               chan ReplyMsg `json:"-"`
 	heartbeatFailTimes int
 	ticker             *time.Ticker
 	ReadDeadline       time.Duration `json:"-"`
@@ -71,21 +68,21 @@ type ClientManager struct {
 	Register            chan *Client
 	Unregister          chan *Client
 	RedisClient         *redis.Client
+	MongoDb             *mongo.Database
+	Mysql               *gorm.DB
 }
-
-// 消息发送类型
-const (
-	SendRes    = "SendRes"    // 消息发送结果
-	Heart      = "Ping"       // 心跳
-	MsgReceive = "MsgReceive" // 消息接收
-	SysMsg     = "SysMsg"     // 消息接收
-	Refresh    = "Refresh"    // 刷新消息列表
-)
 
 type Handler struct {
 	log           *log.Helper
 	producer      rocketmq.Producer
 	ClientManager *ClientManager
+}
+
+type MessageHistory struct {
+	MemberId    uint64    `json:"member_id"`
+	Content     string    `json:"content"`
+	ContentType string    `json:"content_type"`
+	SendTime    time.Time `json:"send_time"`
 }
 
 func NewHandler(producer rocketmq.Producer, logger log.Logger, manager *ClientManager) *Handler {
@@ -116,7 +113,7 @@ func (h *Handler) WsHandler(ctx *gin.Context) {
 	newClient := &Client{
 		Uid:           getClientUid(),
 		Socket:        conn,
-		Send:          make(chan ChatContent),
+		Send:          make(chan ReplyMsg),
 		state:         1,
 		ReadDeadline:  time.Duration(wsConf.ReadDeadline) * time.Second,
 		WriteDeadline: time.Duration(wsConf.WriteDeadline) * time.Second,
@@ -159,7 +156,6 @@ func (c *Client) read(ctx *gin.Context, h *Handler) {
 	}()
 
 	for {
-		isClose := false
 		// 使用 ReadMessage() 读取原始消息字节
 		_, rawMsg, err := c.Socket.ReadMessage()
 		if err != nil {
@@ -212,54 +208,59 @@ func (c *Client) read(ctx *gin.Context, h *Handler) {
 
 		MsgContent := ChatContent{
 			MessageId:   MessageNo,
+			MemberId:    uint64(c.MemberId),
 			ContentType: sendMsg.ContentType,
 			Content:     sendMsg.Content,
 			CreateAt:    time.Now(),
 		}
 
-		ContentBytes, _ := json.Marshal(sendMsg.Content)
-
-		// 消息发送id
-		var SendIds = make([]uint64, 10, 50)
-		for _, client := range h.ClientManager.Clients {
-			if client.GroupId == c.GroupId && client.MemberId != c.MemberId {
-				client.Send <- MsgContent
-				SendIds = append(SendIds, uint64(client.MemberId))
-			}
-		}
+		ContentBytes, _ := json.Marshal(MsgContent)
 
 		// 根据GroupId获取组成员
 		GroupClients, err := utils.GetUsersInGroup(ctx, h.ClientManager.RedisClient, c.GroupId)
 		if err != nil {
 			h.log.Errorf("聊天组数据错误:%s", err.Error())
-			sendErr(h, c, "聊天组数据错误，请联系管理员", isClose)
+			sendErr(h, c, "聊天组数据错误，请联系管理员", false)
 			return
 		}
-		// 收集组内在线成员id
-		GroupOnlineMemberIds := make([]int, 0, 4)
 
 		Ip, _ := utils.GetLocalIP()
 
 		for ClientMemberId, clientInfo := range GroupClients {
 			mId, _ := strconv.Atoi(ClientMemberId)
-			GroupOnlineMemberIds = append(GroupOnlineMemberIds, mId)
+			if mId == int(c.MemberId) {
+				continue
+			}
 			if Ip == clientInfo.IP {
+
 				clientId := h.ClientManager.MapUserIdToClientId[uint(mId)]
 				if clientId != "" {
 					client := h.ClientManager.Clients[clientId]
-
-					err := client.sendByte(websocket.TextMessage, ContentBytes)
+					replyMsg := ReplyMsg{
+						Code:    consts.WsSuccess,
+						Type:    consts.MsgReceive,
+						Content: MsgContent,
+					}
+					//err := client.sendByte(websocket.TextMessage, ContentBytes)
+					client.Send <- replyMsg
 					if err != nil {
 						h.log.Errorf("消息发送失败:%s", err.Error())
-						sendErr(h, c, "消息发送失败，请联系管理员", isClose)
+						sendErr(h, c, "消息发送失败，请联系管理员", false)
 						return
 					}
 				}
 			} else {
-				err = utils.SendMqMsg(h.producer, "chatMessage", clientInfo.MQTag, ContentBytes)
+				MqMsg := utils.MqMsg{
+					Type:   consts.MQ_MSG_TYEP_MEMBER,
+					SendTo: ClientMemberId,
+					Body:   ContentBytes,
+				}
+				JsonData, _ := json.Marshal(MqMsg)
+
+				err = utils.SendMqMsg(h.producer, "chatMessage", clientInfo.MQTag, JsonData)
 				if err != nil {
 					h.log.Errorf("消息发送失败:%s", err.Error())
-					sendErr(h, c, "消息发送失败，请联系管理员", isClose)
+					sendErr(h, c, "消息发送失败，请联系管理员", false)
 					return
 				}
 			}
@@ -268,7 +269,7 @@ func (c *Client) read(ctx *gin.Context, h *Handler) {
 
 		replyMsg := ReplyMsg{
 			Code:    consts.WsSuccess,
-			Type:    SendRes,
+			Type:    consts.SendRes,
 			Content: "success",
 		}
 		msg, _ := json.Marshal(replyMsg)
@@ -276,6 +277,7 @@ func (c *Client) read(ctx *gin.Context, h *Handler) {
 		_ = c.sendByte(websocket.TextMessage, msg)
 
 		// TODO 对Group内未在线用户发送消息记录
+		_ = c.AddMessageToGroup(h, ctx, c.GroupId, MsgContent)
 	}
 }
 
@@ -298,21 +300,16 @@ func (c *Client) write(h *Handler) {
 				_ = c.sendByte(websocket.CloseMessage, []byte{})
 				return
 			}
-			h.log.Debugw("接收消息：", "memberId", c.MemberId, "message", message)
-			replyMsg := ReplyMsg{
-				Code:    consts.WsSuccess,
-				Type:    MsgReceive,
-				Content: message,
-			}
+			h.log.Infow("接收消息：", "memberId", c.MemberId, "message", message)
 
-			msg, _ := json.Marshal(replyMsg)
+			msg, _ := json.Marshal(message)
 			_ = c.sendByte(websocket.TextMessage, msg)
 		case <-c.ticker.C:
 			// 心跳计时器
 			if c.state == 1 {
 				heartMsg, _ := json.Marshal(ReplyMsg{
 					Code:    consts.WsSuccess,
-					Type:    Heart,
+					Type:    consts.Heart,
 					Content: fmt.Sprintf("%d", c.MemberId),
 				})
 				err := c.sendByte(websocket.TextMessage, heartMsg)
@@ -341,7 +338,7 @@ func sendErr(h *Handler, c *Client, msg string, isClose bool) {
 	// 向前端返回数据格式不正确的状态码和消息
 	errMsg, _ := json.Marshal(ReplyMsg{
 		Code:   consts.WsError,
-		Type:   SendRes,
+		Type:   consts.SendRes,
 		ErrMsg: msg,
 	})
 	_ = c.sendByte(websocket.TextMessage, errMsg)
@@ -350,22 +347,6 @@ func sendErr(h *Handler, c *Client, msg string, isClose bool) {
 		h.ClientManager.Unregister <- c
 		_ = c.Socket.Close()
 	}
-}
-
-func SendMsgByMemberId(h *Handler, memberId uint, content interface{}) error {
-	clientId, isExist := h.ClientManager.MapUserIdToClientId[memberId]
-	if isExist {
-		client := h.ClientManager.Clients[clientId]
-		return client.SendMessage(content)
-	} else {
-		return errors.New(consts.GRPC_ERROR, "客户端不存在", "客户端不存在")
-	}
-}
-
-// SendMessage 发送字符串消息
-func (c *Client) SendMessage(message interface{}) error {
-	jsonContent, _ := json.Marshal(message)
-	return c.sendByte(websocket.TextMessage, jsonContent)
 }
 
 // 发送消息基础方法
@@ -380,6 +361,42 @@ func (c *Client) sendByte(messageType int, message []byte) error {
 
 	if err := c.Socket.WriteMessage(messageType, message); err != nil {
 		return err
+	}
+	return nil
+}
+
+type MongoMsgData struct {
+	ID          primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"` // 添加 _id 字段
+	MemberId    uint64             `json:"memberId" bson:"memberId"`
+	GroupId     string             `json:"group_id" bson:"group_id"`
+	MessageBody ChatContent        `json:"message_body" bson:"message_body"`
+	CreateAt    time.Time          `json:"create_at" bson:"create_at"`
+}
+
+// AddMessageToGroup 向指定 group_id 的所有成员添加一条新的消息
+func (c *Client) AddMessageToGroup(h *Handler, ctx *gin.Context, groupID string, messageBody ChatContent) error {
+	var GroupMembers []*model.GroupBind
+	res := h.ClientManager.Mysql.Model(model.GroupBind{}).Where("group_id = ?", groupID).
+		Find(&GroupMembers)
+	coll := h.ClientManager.MongoDb.Collection("group_messages")
+	if res.RowsAffected > 0 {
+		for _, v := range GroupMembers {
+			messageSave := MongoMsgData{
+				MemberId:    v.MemberId,
+				GroupId:     v.GroupId,
+				MessageBody: messageBody,
+				CreateAt:    messageBody.CreateAt,
+			}
+			// 插入消息文档
+			_, err := coll.InsertOne(ctx, messageSave)
+			if err != nil {
+				h.log.Errorf("InsertOne 操作失败: %v", err)
+				return errors.New(consts.HTTP_ERROR, fmt.Sprintf("%w", err), "消息添加失败")
+			}
+			// 记录日志
+			h.log.Infof("已插入消息: %v\n", messageSave)
+
+		}
 	}
 	return nil
 }

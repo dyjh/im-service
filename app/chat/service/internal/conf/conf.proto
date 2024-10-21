@@ -30,9 +30,12 @@ message Server {
 }
 
 message Data {
-  message Database {
-    string driver = 1;
-    string source = 2;
+  message MongoDB {
+    string uri = 1;
+    string database = 2;
+  }
+  message Mysql {
+    string source = 1;
   }
   message Redis {
     string network = 1;
@@ -42,8 +45,9 @@ message Data {
     google.protobuf.Duration read_timeout = 5;
     google.protobuf.Duration write_timeout = 6;
   }
-  Database database = 1;
+  MongoDB mongodb = 1;
   Redis redis = 2;
+  Mysql mysql = 3;
 }
 
 message Websocket {
