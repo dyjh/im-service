@@ -15,6 +15,7 @@ import (
 	"im-service/app/chat/service/internal/service"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
+	"go.opentelemetry.io/otel/sdk/trace"
 )
 
 import (
@@ -24,7 +25,8 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(registry *conf.Registry, confBootstrup *conf.Bootstrap, logger log.Logger, logLevel string) (*kratos.App, *handler.Handler, func(), error) {
+func wireApp(registry *conf.Registry, confBootstrup *conf.Bootstrap, logger log.Logger, logLevel string, tracerProvider *trace.TracerProvider) (*kratos.App, *handler.Handler, func(), error) {
+
 	redis := data.NewRedisClient(confBootstrup.Data)
 	mongo := data.NewMongo(confBootstrup.Data)
 	mysql := data.NewMysql(confBootstrup.Data, logger)
@@ -40,7 +42,7 @@ func wireApp(registry *conf.Registry, confBootstrup *conf.Bootstrap, logger log.
 		Mysql: mysql,
 	}
 	h := handler.NewHandler(producer, logger, clientManager)
-	consumer, mqTag := data.NewMqConsumer(confBootstrup.RocketMq, logLevel, h)
+	consumer, mqTag := data.NewMqConsumer(confBootstrup.RocketMq, logger, logLevel, h)
 	dataData, cleanup, err := data.NewData(mongo, mysql, redis, producer, consumer, mqTag, logger, confBootstrup.Server, clientManager)
 	if err != nil {
 		return nil, nil, nil, err
@@ -48,8 +50,8 @@ func wireApp(registry *conf.Registry, confBootstrup *conf.Bootstrap, logger log.
 	wsRepo := data.NewWsRepo(dataData, logger)
 	WsUseCase := biz.NewWsUseCase(wsRepo, logger)
 	wsService := service.NewWsService(WsUseCase, logger)
-	grpcServer := server.NewGRPCServer(confBootstrup.Server, wsService, logger)
-	httpServer := server.NewHTTPServer(confBootstrup.Server, logger, h)
+	grpcServer := server.NewGRPCServer(confBootstrup.Server, wsService, tracerProvider, logger)
+	httpServer := server.NewHTTPServer(confBootstrup.Server, tracerProvider, logger, h)
 	registrar := server.NewRegistrar(registry)
 	app := newApp(logger, grpcServer, httpServer, registrar)
 	return app, h, func() {

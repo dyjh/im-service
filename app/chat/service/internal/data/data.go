@@ -97,14 +97,15 @@ func NewMqProducer(conf *conf.RocketMq, logLevel string) rocketmq.Producer {
 	return p
 }
 
-func NewMqConsumer(conf *conf.RocketMq, logLevel string, h *handler.Handler) (rocketmq.PushConsumer, string) {
+func NewMqConsumer(conf *conf.RocketMq, logService log.Logger, logLevel string, h *handler.Handler) (rocketmq.PushConsumer, string) {
 
 	rlog.SetLogLevel(logLevel)
-
+	logger := log.NewHelper(logService)
 	c, err := rocketmq.NewPushConsumer(
 		consumer.WithNameServer([]string{conf.Addr}),              // 替换为您的 NameServer 地址
 		consumer.WithGroupName(conf.GroupPrefix+"_chat_consumer"), // 替换为您的消费者组名
 		consumer.WithConsumeFromWhere(consumer.ConsumeFromFirstOffset),
+		consumer.WithMaxReconsumeTimes(5), // 设置最大重试次数
 	)
 	if err != nil {
 		panic(err)
@@ -119,24 +120,29 @@ func NewMqConsumer(conf *conf.RocketMq, logLevel string, h *handler.Handler) (ro
 				ReceiveMsg utils.MqMsg
 				msgBody    handler.ReplyMsg
 			)
+			// 解析外层消息
 			err = json.Unmarshal(msg.Body, &ReceiveMsg)
 			if err != nil {
-				fmt.Printf("消息解析失败")
-				continue
+				logger.Errorf("外层消息解析失败%v", err)
+				// 返回重试结果
+				return consumer.ConsumeRetryLater, err
 			}
 
+			// 解析内层消息
 			err = json.Unmarshal(ReceiveMsg.Body, &msgBody)
 			if err != nil {
-				fmt.Printf("消息解析失败")
-				continue
+				logger.Errorf("内层消息解析失败%v", err)
+				// 返回重试结果
+				return consumer.ConsumeRetryLater, err
 			}
 
 			switch ReceiveMsg.Type {
 			case consts.MQ_MSG_TYEP_MEMBER:
 				mId, err := strconv.Atoi(ReceiveMsg.SendTo)
 				if err != nil {
-					fmt.Printf("消息解析失败")
-					continue
+					logger.Errorf("发送人格式转化失败%v", err)
+					// 返回重试结果
+					return consumer.ConsumeRetryLater, err
 				}
 
 				clientId, isExist := h.ClientManager.MapUserIdToClientId[uint(mId)]

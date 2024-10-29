@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/apache/rocketmq-client-go/v2"
@@ -72,6 +70,14 @@ type ClientManager struct {
 	Mysql               *gorm.DB
 }
 
+type MongoMsgData struct {
+	ID          primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"` // 添加 _id 字段
+	MemberId    uint64             `json:"memberId" bson:"memberId"`
+	GroupId     string             `json:"group_id" bson:"group_id"`
+	MessageBody ChatContent        `json:"message_body" bson:"message_body"`
+	CreateAt    time.Time          `json:"create_at" bson:"create_at"`
+}
+
 type Handler struct {
 	log           *log.Helper
 	producer      rocketmq.Producer
@@ -111,7 +117,7 @@ func (h *Handler) WsHandler(ctx *gin.Context) {
 
 	// 创建一个用户客户端会话实例
 	newClient := &Client{
-		Uid:           getClientUid(),
+		Uid:           utils.GetClientUid(),
 		Socket:        conn,
 		Send:          make(chan ReplyMsg),
 		state:         1,
@@ -127,20 +133,6 @@ func (h *Handler) WsHandler(ctx *gin.Context) {
 
 	// 启动心跳服务
 	newClient.HeartBeat()
-}
-
-func getClientUid() string {
-	// 获取当前时间戳（毫秒）
-	timestamp := time.Now().UnixNano() / int64(time.Millisecond)
-
-	// 将时间戳转换为字符串
-	timestampStr := strconv.FormatInt(timestamp, 10)
-
-	// 计算字符串的MD5哈希值
-	hash := md5.Sum([]byte(timestampStr))
-
-	// 将哈希值转换为十六进制字符串
-	return hex.EncodeToString(hash[:])
 }
 
 // 从websocket读取客户端用户的消息，然后服务器回应前端一个消息
@@ -363,14 +355,6 @@ func (c *Client) sendByte(messageType int, message []byte) error {
 		return err
 	}
 	return nil
-}
-
-type MongoMsgData struct {
-	ID          primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"` // 添加 _id 字段
-	MemberId    uint64             `json:"memberId" bson:"memberId"`
-	GroupId     string             `json:"group_id" bson:"group_id"`
-	MessageBody ChatContent        `json:"message_body" bson:"message_body"`
-	CreateAt    time.Time          `json:"create_at" bson:"create_at"`
 }
 
 // AddMessageToGroup 向指定 group_id 的所有成员添加一条新的消息

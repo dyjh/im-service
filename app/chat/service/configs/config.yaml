@@ -27,3 +27,5 @@ rocketMq:
   groupPrefix: "im-service"
 log:
   level: "error"
+trace:
+  endpoint: http://127.0.0.1:14268/api/traces

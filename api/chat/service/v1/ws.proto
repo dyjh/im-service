@@ -9,12 +9,17 @@ option java_multiple_files = true;
 option java_package = "chat.service.v1";
 
 service Ws {
+	// WsClient绑定用户
 	rpc BindMember (BindMemberRequest) returns (BindMemberReply);
+	// WsClient绑定聊天组
 	rpc BindGroup (BindGroupRequest) returns (BindGroupReply);
+	// WsClient取消聊天组绑定
 	rpc CancelGroup (CancelGroupRequest) returns (CancelGroupReply);
+	// 发送系统消息
 	rpc SendMsg (SendMsgRequest) returns (SendMsgReply);
-
+  // 退出聊天组与删除记录
 	rpc DelGroupColl (DelGroupCollRequest) returns (DelGroupCollReply);
+	// 获取聊天组消息记录
 	rpc GetGroupHistory (GetGroupHistoryRequest) returns (GetGroupHistoryReply);
 }
 

@@ -1,0 +1,27 @@
+version: '3'
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      - STORAGE_TYPE=cassandra
+      - CASSANDRA_SERVERS=cassandra  # 配置为 Cassandra 容器名称
+      - COLLECTOR_ZIPKIN_HTTP_PORT=9411
+    ports:
+      - "5775:5775/udp"         # Jaeger 客户端端口
+      - "6831:6831/udp"         # Jaeger 客户端端口
+      - "6832:6832/udp"         # Jaeger 客户端端口
+      - "5778:5778"             # 采样配置端口
+      - "16686:16686"           # Jaeger UI
+      - "14250:14250"           # gRPC 收集器接口
+      - "14268:14268"           # HTTP 收集器接口
+      - "14269:14269"           # Admin HTTP 服务
+      - "9411:9411"             # Zipkin 兼容端口
+
+  cassandra:
+    image: cassandra:latest
+    environment:
+      - CASSANDRA_CLUSTER_NAME=jaeger_cluster  # 配置 Cassandra 集群名称
+      - CASSANDRA_NUM_TOKENS=256              # 优化分布式性能
+      - CASSANDRA_START_RPC=true
+    ports:
+      - "9042:9042"             # Cassandra 的默认端口，用于 Jaeger 连接

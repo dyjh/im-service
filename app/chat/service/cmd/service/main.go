@@ -3,20 +3,24 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/go-kratos/kratos/v2"
-	"github.com/go-kratos/kratos/v2/registry"
-	"im-service/app/chat/service/internal/conf"
-	"im-service/app/chat/service/utils"
 	"os"
 	"strings"
 
+	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/config"
 	"github.com/go-kratos/kratos/v2/config/file"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware/tracing"
+	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/go-kratos/kratos/v2/transport/http"
+	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/sdk/resource"
+	tracesdk "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	_ "go.uber.org/automaxprocs"
+	"im-service/app/chat/service/internal/conf"
+	"im-service/app/chat/service/utils"
 )
 
 // go build -ldflags "-X main.Version=x.y.z"
@@ -111,19 +115,19 @@ func main() {
 
 	logger = log.NewFilter(logger, log.FilterLevel(loggerSetLevel))
 
-	/*exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(bc.Trace.Endpoint)))
+	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(bc.Trace.Endpoint)))
 	if err != nil {
 		panic(err)
 	}
+
 	tp := tracesdk.NewTracerProvider(
 		tracesdk.WithBatcher(exp),
 		tracesdk.WithResource(resource.NewSchemaless(
 			semconv.ServiceNameKey.String(Name),
 		)),
-	)*/
+	)
 
-	//app, cleanup, err := wireApp(&rc, bc.Server, bc.Data, logger, tp)
-	app, h, cleanup, err := wireApp(&rc, &bc, logger, logLevel)
+	app, h, cleanup, err := wireApp(&rc, &bc, logger, logLevel, tp)
 	if err != nil {
 		panic(err)
 	}

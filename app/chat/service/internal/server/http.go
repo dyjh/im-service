@@ -14,6 +14,7 @@ import (
 	"github.com/go-kratos/kratos/v2/middleware/validate"
 	"github.com/go-kratos/kratos/v2/transport"
 	"github.com/go-kratos/kratos/v2/transport/http"
+	tracesdk "go.opentelemetry.io/otel/sdk/trace"
 	"im-service/app/chat/service/cmd/service/handler"
 	"im-service/app/chat/service/internal/conf"
 )
@@ -28,13 +29,14 @@ func customMiddleware(handler middleware.Handler) middleware.Handler {
 	}
 }
 
-func NewHTTPServer(c *conf.Server, logger log.Logger, h *handler.Handler) *http.Server {
+func NewHTTPServer(c *conf.Server, tp *tracesdk.TracerProvider, logger log.Logger, h *handler.Handler) *http.Server {
 
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
 			validate.Validator(),
-			tracing.Server(),
+			tracing.Server(
+				tracing.WithTracerProvider(tp)),
 			metadata.Server(),
 			logging.Server(logger),
 		),
