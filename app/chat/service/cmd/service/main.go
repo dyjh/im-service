@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"im-service/app/chat/service/cmd/service/core"
 	"os"
 	"strings"
 
@@ -61,7 +62,7 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, rr registry.Reg
 
 func main() {
 	flag.Parse()
-	logger := log.With(log.NewStdLogger(os.Stdout),
+	/*logger := log.With(log.NewStdLogger(os.Stdout),
 		"ts", log.DefaultTimestamp,
 		"caller", log.DefaultCaller,
 		"service.id", id,
@@ -69,7 +70,7 @@ func main() {
 		"service.version", Version,
 		"trace.id", tracing.TraceID(),
 		"span.id", tracing.SpanID(),
-	)
+	)*/
 	c := config.New(
 		config.WithSource(
 			file.NewSource(flagConf),
@@ -90,30 +91,45 @@ func main() {
 	if err := c.Scan(&rc); err != nil {
 		panic(err)
 	}
-
 	logLevel := strings.ToLower(bc.Log.Level)
-	var loggerSetLevel log.Level
-	switch logLevel {
-	case "debug":
-		loggerSetLevel = log.LevelDebug
-		break
-	case "info":
-		loggerSetLevel = log.LevelInfo
-		break
-	case "warn":
-		loggerSetLevel = log.LevelWarn
-		break
-	case "error":
-		loggerSetLevel = log.LevelError
-		break
-	case "fatal":
-		loggerSetLevel = log.LevelFatal
-		break
-	default:
-		panic("日志配置错误")
-	}
+	/*
+		var loggerSetLevel log.Level
+		switch logLevel {
+		case "debug":
+			loggerSetLevel = log.LevelDebug
+			break
+		case "info":
+			loggerSetLevel = log.LevelInfo
+			break
+		case "warn":
+			loggerSetLevel = log.LevelWarn
+			break
+		case "error":
+			loggerSetLevel = log.LevelError
+			break
+		case "fatal":
+			loggerSetLevel = log.LevelFatal
+			break
+		default:
+			panic("日志配置错误")
+		}*/
 
-	logger = log.NewFilter(logger, log.FilterLevel(loggerSetLevel))
+	// 创建 Zap Logger
+	zapLogger := core.Zap(bc.Log)
+
+	defer zapLogger.Sync()
+
+	// 创建 Kratos 适配器的 Zap Logger
+	kratosLogger := core.NewZapLoggerAdapter(zapLogger)
+
+	// 设置服务的其他元数据
+	logger := log.With(kratosLogger,
+		"service.id", id,
+		"service.name", Name,
+		"service.version", Version,
+		"trace.id", tracing.TraceID(),
+		"span.id", tracing.SpanID(),
+	)
 
 	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(bc.Trace.Endpoint)))
 	if err != nil {

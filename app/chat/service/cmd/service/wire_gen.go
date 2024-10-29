@@ -7,15 +7,15 @@
 package main
 
 import (
-	"im-service/app/chat/service/cmd/service/handler"
-	"im-service/app/chat/service/internal/biz"
-	"im-service/app/chat/service/internal/conf"
-	"im-service/app/chat/service/internal/data"
-	"im-service/app/chat/service/internal/server"
-	"im-service/app/chat/service/internal/service"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
 	"go.opentelemetry.io/otel/sdk/trace"
+	"im-service/app/chat/service/internal/biz"
+	"im-service/app/chat/service/internal/conf"
+	"im-service/app/chat/service/internal/data"
+	"im-service/app/chat/service/internal/handler"
+	"im-service/app/chat/service/internal/server"
+	"im-service/app/chat/service/internal/service"
 )
 
 import (

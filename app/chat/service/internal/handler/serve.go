@@ -41,7 +41,7 @@ func (manager *ClientManager) WebSocketStart(c *conf.Websocket, logger log.Logge
 			manager.Clients[conn.Uid] = conn
 			replyMsg := &InitMsg{
 				Code:     consts.WsSuccess,
-				Type:     "init",
+				Type:     "core",
 				Content:  "已连接至服务器",
 				ClientId: conn.Uid,
 			}

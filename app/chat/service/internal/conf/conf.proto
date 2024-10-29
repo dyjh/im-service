@@ -78,4 +78,10 @@ message RocketMq {
 
 message Log {
   string level = 1;
+  string format = 2;
+  string director = 3;
+  string encode_level = 4;
+  string stacktrace_key = 5;
+  bool show_line = 6;
+  bool log_in_console = 7;
 }

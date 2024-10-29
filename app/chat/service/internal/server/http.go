@@ -15,8 +15,8 @@ import (
 	"github.com/go-kratos/kratos/v2/transport"
 	"github.com/go-kratos/kratos/v2/transport/http"
 	tracesdk "go.opentelemetry.io/otel/sdk/trace"
-	"im-service/app/chat/service/cmd/service/handler"
 	"im-service/app/chat/service/internal/conf"
+	"im-service/app/chat/service/internal/handler"
 )
 
 func customMiddleware(handler middleware.Handler) middleware.Handler {

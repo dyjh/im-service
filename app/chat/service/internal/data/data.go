@@ -15,9 +15,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	"im-service/app/chat/service/cmd/service/handler"
 	"im-service/app/chat/service/internal/conf"
 	"im-service/app/chat/service/internal/consts"
+	"im-service/app/chat/service/internal/handler"
 	"im-service/app/chat/service/internal/model"
 	"im-service/app/chat/service/utils"
 	"strconv"
@@ -125,7 +125,7 @@ func NewMqConsumer(conf *conf.RocketMq, logService log.Logger, logLevel string, 
 			if err != nil {
 				logger.Errorf("外层消息解析失败%v", err)
 				// 返回重试结果
-				return consumer.ConsumeRetryLater, err
+				continue
 			}
 
 			// 解析内层消息
@@ -133,7 +133,7 @@ func NewMqConsumer(conf *conf.RocketMq, logService log.Logger, logLevel string, 
 			if err != nil {
 				logger.Errorf("内层消息解析失败%v", err)
 				// 返回重试结果
-				return consumer.ConsumeRetryLater, err
+				continue
 			}
 
 			switch ReceiveMsg.Type {
