@@ -38,14 +38,14 @@
 │       └── service
 │           ├── cmd  // 项目启动入口
 │           │   └── server
-│           │       ├── handler // WebSocket 处理器
 │           │       ├── main.go
 │           │       ├── wire.go  // 使用 Wire 进行依赖注入
 │           │       └── wire_gen.go
 │           ├── configs  // 配置文件
 │           │  ├── config.yaml
 │           │  └── registry.yaml
-│	      ├── internal  // 内部业务逻辑
+│	    ├── internal  // 内部业务逻辑
+│           │   ├── handler // WebSocket 处理器
 │           │   ├── biz   // 业务逻辑层
 │           │   │   ├── biz.go
 │           │   │   └── ws.go
